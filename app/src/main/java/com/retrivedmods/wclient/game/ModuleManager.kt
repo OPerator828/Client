@@ -2,11 +2,11 @@ package com.retrivedmods.wclient.game
 
 import android.content.Context
 import android.net.Uri
+import android.os.Environment
 import com.retrivedmods.wclient.application.AppContext
 import com.retrivedmods.wclient.game.module.combat.ACAModule
 import com.retrivedmods.wclient.game.module.combat.AntiCrystalModule
 import com.retrivedmods.wclient.game.module.combat.AntiKnockbackModule
-import com.retrivedmods.wclient.game.module.combat.AutoArmorModule
 import com.retrivedmods.wclient.game.module.combat.CrystalSmashModule
 import com.retrivedmods.wclient.game.module.combat.EnemyHunterModule
 import com.retrivedmods.wclient.game.module.combat.HitAndRunModule
@@ -14,26 +14,27 @@ import com.retrivedmods.wclient.game.module.combat.HitboxModule
 import com.retrivedmods.wclient.game.module.combat.KillauraModule
 import com.retrivedmods.wclient.game.module.combat.TriggerBotModule
 import com.retrivedmods.wclient.game.module.combat.WAuraModule
-import com.retrivedmods.wclient.game.module.misc.DisablerModule
 import com.retrivedmods.wclient.game.module.combat.AutoFightModule
 import com.retrivedmods.wclient.game.module.combat.AutoHvHModule
+import com.retrivedmods.wclient.game.module.combat.AutoTotemModule
+import com.retrivedmods.wclient.game.module.combat.HotbarSwitcherModule
+import com.retrivedmods.wclient.game.module.combat.InfiniteAuraModule
 import com.retrivedmods.wclient.game.module.misc.ArrayListModule
+import com.retrivedmods.wclient.game.module.motion.NoClipModule
 import com.retrivedmods.wclient.game.module.misc.AutoDisconnectModule
-import com.retrivedmods.wclient.game.module.misc.BaritoneModule
 import com.retrivedmods.wclient.game.module.misc.CommandHandlerModule
 import com.retrivedmods.wclient.game.module.visual.CoordinatesModule
 import com.retrivedmods.wclient.game.module.misc.DesyncModule
 import com.retrivedmods.wclient.game.module.misc.FakeDeathModule
 import com.retrivedmods.wclient.game.module.misc.FakeXPModule
-
 import com.retrivedmods.wclient.game.module.misc.MinerModule
 import com.retrivedmods.wclient.game.module.misc.NoChatModule
-import com.retrivedmods.wclient.game.module.motion.NoClipModule
 import com.retrivedmods.wclient.game.module.misc.PieChartModule
 import com.retrivedmods.wclient.game.module.misc.PositionLoggerModule
 import com.retrivedmods.wclient.game.module.misc.ReplayModule
-
 import com.retrivedmods.wclient.game.module.misc.ChestStealerModule
+import com.retrivedmods.wclient.game.module.misc.SpammerModule
+import com.retrivedmods.wclient.game.module.misc.ToggleSoundModule
 import com.retrivedmods.wclient.game.module.misc.WaterMarkModule
 import com.retrivedmods.wclient.game.module.world.AntiDebuffModule
 import com.retrivedmods.wclient.game.module.world.EffectsModule
@@ -52,7 +53,6 @@ import com.retrivedmods.wclient.game.module.motion.PlayerTPModule
 import com.retrivedmods.wclient.game.module.motion.SpeedModule
 import com.retrivedmods.wclient.game.module.motion.SpiderModule
 import com.retrivedmods.wclient.game.module.motion.SprintModule
-import com.retrivedmods.wclient.game.module.motion.UnifiedFlyModule
 import com.retrivedmods.wclient.game.module.visual.CrosshairModule
 import com.retrivedmods.wclient.game.module.visual.DamageTextModule
 import com.retrivedmods.wclient.game.module.visual.ESPModule
@@ -70,7 +70,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 import java.io.File
+
 object ModuleManager {
 
     private val _modules: MutableList<Module> = ArrayList()
@@ -86,25 +88,25 @@ object ModuleManager {
         with(_modules) {
             // Combat
             add(WAuraModule())
+            add(HotbarSwitcherModule())
             add(KillauraModule())
             add(AutoFightModule())
+            add(InfiniteAuraModule())
             add(ACAModule())
+            add(AutoTotemModule())
             add(AutoHvHModule())
             add(EnemyHunterModule())
             add(AntiKnockbackModule())
-            add(AutoArmorModule())
+
             add(AntiCrystalModule())
             add(HitAndRunModule())
             add(HitboxModule())
             add(CrystalSmashModule())
             add(TriggerBotModule())
 
-            
             // Motion
-
             add(MotionFlyModule())
             add(PlayerTPModule())
-
             add(FlyModule())
             add(SpeedModule())
             add(AirJumpModule())
@@ -116,15 +118,12 @@ object ModuleManager {
             add(AutoWalkModule())
             add(AntiAFKModule())
             add(SpiderModule())
-            add(UnifiedFlyModule())
-            
-            // Visual
 
+            // Visual
             add(DamageTextModule())
             add(ESPModule())
             add(PlayerJoinModule())
             add(ZoomModule())
-
             add(CoordinatesModule())
             add(NoHurtCameraModule())
             add(SpeedDisplayModule())
@@ -135,7 +134,6 @@ object ModuleManager {
             add(TargetHudModule())
             add(FullbrightModule())
 
-            
             // World
             add(FreeCameraModule())
             add(TimeShiftModule())
@@ -145,17 +143,18 @@ object ModuleManager {
             add(AntiDebuffModule())
 
             // Misc
+
             add(AutoDisconnectModule())
             add(ArrayListModule())
+            add(ToggleSoundModule())
             add(ChestStealerModule())
             add(DesyncModule())
+            add(SpammerModule())
             add(WaterMarkModule())
             add(PositionLoggerModule())
             add(NoChatModule())
-            add(DisablerModule())
             add(CommandHandlerModule())
             add(ReplayModule())
-            add(BaritoneModule())
             add(PieChartModule())
             add(FakeDeathModule())
             add(FakeXPModule())
@@ -164,6 +163,11 @@ object ModuleManager {
     }
 
     fun saveConfig() {
+
+        if (!AppContext.isInitialized) {
+            return
+        }
+
         val configsDir = AppContext.instance.filesDir.resolve("configs")
         configsDir.mkdirs()
 
@@ -179,10 +183,15 @@ object ModuleManager {
             })
         }
 
-        config.writeText(json.encodeToString(jsonObject))
+        config.writeText(json.encodeToString(JsonObject.serializer(), jsonObject))
     }
 
     fun loadConfig() {
+
+        if (!AppContext.isInitialized) {
+            return
+        }
+
         val configsDir = AppContext.instance.filesDir.resolve("configs")
         configsDir.mkdirs()
 
@@ -196,12 +205,17 @@ object ModuleManager {
             return
         }
 
-        val jsonObject = json.parseToJsonElement(jsonString).jsonObject
-        val modules = jsonObject["modules"]!!.jsonObject
-        _modules.forEach { module ->
-            (modules[module.name] as? JsonObject)?.let {
-                module.fromJson(it)
+        try {
+            val jsonObject = json.parseToJsonElement(jsonString).jsonObject
+            val modules = jsonObject["modules"]?.jsonObject ?: return
+
+            _modules.forEach { module ->
+                (modules[module.name] as? JsonObject)?.let {
+                    module.fromJson(it)
+                }
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
@@ -216,7 +230,7 @@ object ModuleManager {
                 }
             })
         }
-        return json.encodeToString(jsonObject)
+        return json.encodeToString(JsonObject.serializer(), jsonObject)
     }
 
     fun importConfig(configStr: String) {
@@ -232,21 +246,51 @@ object ModuleManager {
                 }
             }
         } catch (e: Exception) {
-            throw IllegalArgumentException("Invalid config format")
+            throw IllegalArgumentException("Invalid config format: ${e.message}")
         }
     }
 
-    fun exportConfigToFile(context: Context, fileName: String): Boolean {
+    fun exportConfigToFile(context: Context, filePath: String): Boolean {
         return try {
-            val configsDir = context.getExternalFilesDir("configs")
-            configsDir?.mkdirs()
+            val file = if (filePath.contains("/")) {
+                File(filePath)
+            } else {
+                val configsDir = context.getExternalFilesDir("configs")
+                configsDir?.mkdirs()
+                File(configsDir, if (filePath.endsWith(".json")) filePath else "$filePath.json")
+            }
 
-            val configFile = File(configsDir, "$fileName.json")
-            configFile.writeText(exportConfig())
+            file.parentFile?.mkdirs()
+            file.writeText(exportConfig())
             true
         } catch (e: Exception) {
             e.printStackTrace()
             false
+        }
+    }
+
+    fun getWClientConfigsDirectory(): File? {
+        return try {
+            val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+
+            val baseDir = if (documentsDir.exists() || documentsDir.mkdirs()) {
+                documentsDir
+            } else {
+                downloadsDir
+            }
+
+            val wclientDir = File(baseDir, "WClient")
+            val configsDir = File(wclientDir, "configs")
+
+            if (configsDir.exists() || configsDir.mkdirs()) {
+                configsDir
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
         }
     }
 

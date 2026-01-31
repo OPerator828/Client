@@ -23,7 +23,7 @@ class AutoHvHModule : Module("Auto HVH", ModuleCategory.Combat) {
 
     private var verticalRange by floatValue("VerticalRange", 12f, 0f..20f)
     private var verticalSpeed by floatValue("VerticalSpeed", 2f, 0.1f..10f)
-    private var enableVerticalMotion by boolValue("AutoHvH Motion", true)
+    private var enableVerticalMotion by boolValue("AutoHVH Motion", true)
 
     private var lastMoveTime = 0L
     private var lastAttackTime = 0L

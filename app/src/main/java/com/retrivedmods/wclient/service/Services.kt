@@ -36,7 +36,7 @@ object Services {
 
     private val handler = Handler(Looper.getMainLooper())
 
-    private var novaRelay: WRelay? = null
+    private var wRelay: WRelay? = null
     private var thread: Thread? = null
 
     private var renderView: RenderOverlayView? = null
@@ -88,16 +88,16 @@ object Services {
             return
         }
 
-        novaRelay?.let { relay ->
+        wRelay?.let { relay ->
             try {
                 if (relay.javaClass.methods.any { it.name == "stop" }) {
                     relay.javaClass.getMethod("stop").invoke(relay)
                 }
             } catch (e: Exception) {
-                Log.e("Services", "Error stopping existing NovaRelay: ${e.message}")
+                Log.e("Services", "Error stopping existing WRelay: ${e.message}")
             }
         }
-        novaRelay = null
+        wRelay = null
 
         File(context.cacheDir, "token_cache.json")
 
@@ -109,7 +109,7 @@ object Services {
         setupOverlay(context)
 
         thread = thread(
-            name = "NovaRelayThread",
+            name = "WRelayThread",
             priority = Thread.MAX_PRIORITY
         ) {
             runCatching {
@@ -130,14 +130,14 @@ object Services {
 
             runCatching {
                 clearNetworkCaches()
-                
+
                 val remoteAddress = WAddress(
                     captureModeModel.serverHostName,
                     captureModeModel.serverPort
                 )
-                
+
                 val serverConfig = getServerConfig(captureModeModel)
-                novaRelay = if (captureModeModel.isProtectedServer() && captureModeModel.enableServerOptimizations) {
+                wRelay = if (captureModeModel.isProtectedServer() && captureModeModel.enableServerOptimizations) {
                     WRelay(
                         localAddress = WAddress("0.0.0.0", 19132),
                         serverConfig = serverConfig
@@ -162,30 +162,30 @@ object Services {
                 }
             }.exceptionOrNull()?.let {
                 it.printStackTrace()
-                context.toast("Start NovaRelay error: ${it.message}")
+                context.toast("Start WRelay error: ${it.message}")
             }
         }
     }
 
     private fun off() {
-        thread(name = "NovaRelayThread") {
+        thread(name = "WRelayThread") {
             ModuleManager.saveConfig()
 
-            novaRelay?.let { relay ->
+            wRelay?.let { relay ->
                 try {
                     relay.wRelaySession?.client?.disconnect()
                     relay.wRelaySession?.server?.disconnect()
-                    
+
                     if (relay.javaClass.methods.any { it.name == "stop" }) {
                         relay.javaClass.getMethod("stop").invoke(relay)
-                        Log.d("Services", "NovaRelay connection stopped successfully")
+                        Log.d("Services", "WRelay connection stopped successfully")
                     }
                 } catch (e: Exception) {
-                    Log.e("Services", "Error stopping NovaRelay: ${e.message}")
+                    Log.e("Services", "Error stopping WRelay: ${e.message}")
                     e.printStackTrace()
                 }
             }
-            novaRelay = null
+            wRelay = null
 
             clearNetworkCaches()
 
@@ -203,7 +203,7 @@ object Services {
             thread?.interrupt()
             thread = null
 
-            Log.d("Services", "NovaRelay service stopped and cleaned up")
+            Log.d("Services", "WRelay service stopped and cleaned up")
         }
     }
 
@@ -213,11 +213,11 @@ object Services {
         }
     }
 
-    private fun initModules(novaRelaySession: WRelaySession) {
-        val session = GameSession(novaRelaySession)
-        novaRelaySession.listeners.add(session)
+    private fun initModules(wRelaySession: WRelaySession) {
+        val session = GameSession(wRelaySession)
+        wRelaySession.listeners.add(session)
 
-        novaRelaySession.listeners.add(com.retrivedmods.wrelay.listener.VersionTrackingListener() { protocol, version ->
+        wRelaySession.listeners.add(com.retrivedmods.wrelay.listener.VersionTrackingListener() { protocol, version ->
             detectedProtocolVersion = protocol
             detectedMinecraftVersion = version
             Log.i("Services", "Client version: Minecraft $version (Protocol $protocol)")
@@ -256,6 +256,8 @@ object Services {
 
         renderView = RenderOverlayView(context)
         ESPModule.setRenderView(renderView!!)
+
+
 
         handler.post {
             try {

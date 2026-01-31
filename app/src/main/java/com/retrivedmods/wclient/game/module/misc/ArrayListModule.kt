@@ -14,18 +14,22 @@ import kotlinx.coroutines.launch
 class ArrayListModule : Module("arraylist", ModuleCategory.Misc) {
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    
+
     private val sortMode by enumValue("Sort", SortMode.LENGTH, SortMode::class.java)
     private val animationSpeed by intValue("Animation Speed", 300, 100..1000)
     private val showBackground by boolValue("Background", true)
-    private val showBorder by boolValue("Border", false)
+    private val showBorder by boolValue("Border", true)
     private val borderStyle by enumValue("Border Style", BorderStyle.LEFT, BorderStyle::class.java)
-    private val colorMode by enumValue("Color Mode", ColorMode.RAINBOW, ColorMode::class.java)
+    private val colorMode by enumValue("Color Mode", ColorMode.SMOOTH_GRADIENT, ColorMode::class.java)
     private val rainbowSpeed by floatValue("Rainbow Speed", 1.0f, 0.1f..5.0f)
     private val fontSize by intValue("Font Size", 14, 8..24)
     private val spacing by intValue("Spacing", 2, 0..10)
     private val fadeAnimation by boolValue("Fade Animation", true)
     private val slideAnimation by boolValue("Slide Animation", true)
+    private val fontStyle by enumValue("Font Style", FontStyle.NORMAL, FontStyle::class.java)
+    private val gradientIntensity by floatValue("Gradient Intensity", 1.0f, 0.5f..3.0f)
+    private val glowEffect by boolValue("Glow Effect", true)
+    private val smoothGradient by boolValue("Smooth Gradient", true)
 
     private var lastUpdateTime = 0L
     private val updateInterval = 50L
@@ -68,6 +72,10 @@ class ArrayListModule : Module("arraylist", ModuleCategory.Misc) {
         ArrayListOverlay.setSpacing(spacing)
         ArrayListOverlay.setFadeAnimation(fadeAnimation)
         ArrayListOverlay.setSlideAnimation(slideAnimation)
+        ArrayListOverlay.setFontStyle(fontStyle)
+        ArrayListOverlay.setGradientIntensity(gradientIntensity)
+        ArrayListOverlay.setGlowEffect(glowEffect)
+        ArrayListOverlay.setSmoothGradient(smoothGradient)
     }
 
     private fun startUpdateLoop() {
@@ -87,8 +95,8 @@ class ArrayListModule : Module("arraylist", ModuleCategory.Misc) {
         val enabledModules = ModuleManager.modules
             .filter { module ->
                 module.isEnabled &&
-                module.name.isNotEmpty() &&
-                module != this
+                        module.name.isNotEmpty() &&
+                        module != this
             }
             .map { module ->
                 ArrayListOverlay.ModuleInfo(
@@ -119,7 +127,7 @@ class ArrayListModule : Module("arraylist", ModuleCategory.Misc) {
 
     override fun beforePacketBound(interceptablePacket: InterceptablePacket) {
         if (!isEnabled || !isSessionCreated) return
-        
+
         val currentTime = System.currentTimeMillis()
         if (currentTime - lastUpdateTime >= updateInterval) {
             updateModuleList()
@@ -136,6 +144,18 @@ class ArrayListModule : Module("arraylist", ModuleCategory.Misc) {
     }
 
     enum class ColorMode {
-        RAINBOW, GRADIENT, STATIC, CATEGORY_BASED, RANDOM
+        RAINBOW,
+        PULSE,
+        SMOOTH_GRADIENT,
+        GRADIENT,
+        WAVE,
+        STATIC,
+        CATEGORY_BASED,
+        RANDOM
+    }
+
+    enum class FontStyle {
+        NORMAL,      // Default system font
+        MINECRAFT    // Minecraft-style font (requires minecraft.ttf in res/font/)
     }
 }

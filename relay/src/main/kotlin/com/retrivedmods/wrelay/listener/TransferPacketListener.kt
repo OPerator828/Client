@@ -7,20 +7,20 @@ import org.cloudburstmc.protocol.bedrock.packet.TransferPacket
 
 @Suppress("MemberVisibilityCanBePrivate")
 class TransferPacketListener(
-    val novaRelaySession: WRelaySession
+    val wRelaySession: WRelaySession
 ) : WRelayPacketListener {
 
     override fun beforeServerBound(packet: BedrockPacket): Boolean {
         if (packet is TransferPacket) {
             val remoteAddress = WAddress(packet.address, packet.port)
-            val localAddress = novaRelaySession.wRelay.localAddress
-            novaRelaySession.wRelay.remoteAddress = remoteAddress
-            novaRelaySession.clientBoundImmediately(TransferPacket().apply {
+            val localAddress = wRelaySession.wRelay.localAddress
+            wRelaySession.wRelay.remoteAddress = remoteAddress
+            wRelaySession.clientBoundImmediately(TransferPacket().apply {
                 address = localAddress.hostName
                 port = localAddress.port
             })
 
-            novaRelaySession.wRelay.wRelaySession = null
+            wRelaySession.wRelay.wRelaySession = null
             return true
         }
         return false

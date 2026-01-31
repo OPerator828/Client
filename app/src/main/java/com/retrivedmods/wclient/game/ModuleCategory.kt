@@ -36,4 +36,9 @@ enum class ModuleCategory(
         labelResId = R.string.misc,
         displayName = "Misc"
     ),
+    Config(
+        iconResId = R.drawable.ic_settings,
+        labelResId = R.string.config,
+        displayName = "Config"
+    ),
 }

@@ -29,7 +29,12 @@ import com.retrivedmods.wclient.ui.component.WGlassCard
 import com.retrivedmods.wclient.ui.theme.WColors
 import com.retrivedmods.wclient.util.LocalSnackbarHostState
 import com.retrivedmods.wclient.util.SnackbarHostStateScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -43,6 +48,7 @@ fun SettingsPageContent() {
         var showOpacityDialog by rememberSaveable { mutableStateOf(false) }
         var showFileNameDialog by rememberSaveable { mutableStateOf(false) }
         var configFileName by rememberSaveable { mutableStateOf("") }
+        var isExporting by remember { mutableStateOf(false) }
 
         var overlayOpacity by remember {
             mutableFloatStateOf(prefs.getFloat("overlay_opacity", 1f))
@@ -61,6 +67,36 @@ fun SettingsPageContent() {
                         if (ok) "Config imported successfully" else "Failed to import config"
                     )
                 }
+            }
+        }
+
+
+        suspend fun exportConfig(fileName: String): Result<String> = withContext(Dispatchers.IO) {
+            try {
+
+                val configsDir = ModuleManager.getWClientConfigsDirectory()
+                    ?: return@withContext Result.failure(Exception("Failed to create WClient directory"))
+
+
+                val finalFileName = if (fileName.isBlank()) {
+                    val timestamp = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.getDefault()).format(Date())
+                    "config_$timestamp"
+                } else {
+                    fileName
+                }
+
+                val configFile = File(configsDir, "$finalFileName.json")
+
+
+                val success = ModuleManager.exportConfigToFile(context, configFile.absolutePath)
+
+                if (success) {
+                    Result.success(configFile.absolutePath)
+                } else {
+                    Result.failure(Exception("Failed to export configuration"))
+                }
+            } catch (e: Exception) {
+                Result.failure(e)
             }
         }
 
@@ -170,11 +206,19 @@ fun SettingsPageContent() {
 
                         FilledTonalButton(
                             onClick = { showFileNameDialog = true },
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !isExporting
                         ) {
-                            Icon(Icons.Rounded.SaveAlt, null, modifier = Modifier.size(18.dp))
+                            if (isExporting) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(Icons.Rounded.SaveAlt, null, modifier = Modifier.size(18.dp))
+                            }
                             Spacer(Modifier.width(8.dp))
-                            Text("Export Config")
+                            Text(if (isExporting) "Exporting..." else "Export Config")
                         }
                     }
                 }
@@ -182,50 +226,100 @@ fun SettingsPageContent() {
                 if (showFileNameDialog) {
                     BasicAlertDialog(
                         onDismissRequest = {
-                            showFileNameDialog = false
-                            configFileName = ""
+                            if (!isExporting) {
+                                showFileNameDialog = false
+                                configFileName = ""
+                            }
                         },
                         modifier = Modifier.padding(24.dp)
                     ) {
-                        Surface(shape = AlertDialogDefaults.shape, tonalElevation = AlertDialogDefaults.TonalElevation) {
+                        Surface(
+                            shape = AlertDialogDefaults.shape,
+                            tonalElevation = AlertDialogDefaults.TonalElevation
+                        ) {
                             Column(
                                 modifier = Modifier.padding(24.dp),
                                 verticalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
-                                Text("Save Configuration", style = MaterialTheme.typography.headlineSmall)
+                                Text(
+                                    "Export Configuration",
+                                    style = MaterialTheme.typography.headlineSmall
+                                )
+
+                                Text(
+                                    "Config will be saved to: Documents/WClient/configs/",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
                                 OutlinedTextField(
                                     value = configFileName,
                                     onValueChange = { configFileName = it },
-                                    label = { Text("Configuration Name") },
+                                    label = { Text("Configuration Name (Optional)") },
+                                    placeholder = { Text("my-config") },
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth(),
-                                    supportingText = { Text("The config will be saved as '$configFileName.json'") }
+                                    enabled = !isExporting,
+                                    supportingText = {
+                                        Text(
+                                            if (configFileName.isBlank())
+                                                "Leave empty to use timestamp"
+                                            else
+                                                "File: $configFileName.json"
+                                        )
+                                    }
                                 )
+
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.End,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    TextButton(onClick = { showFileNameDialog = false; configFileName = "" }) {
+                                    TextButton(
+                                        onClick = {
+                                            showFileNameDialog = false
+                                            configFileName = ""
+                                        },
+                                        enabled = !isExporting
+                                    ) {
                                         Text("Cancel")
                                     }
                                     Spacer(Modifier.width(8.dp))
                                     FilledTonalButton(
                                         onClick = {
-                                            if (configFileName.isNotBlank()) {
-                                                val ok = ModuleManager.exportConfigToFile(context, configFileName)
-                                                scope.launch {
+                                            isExporting = true
+                                            scope.launch {
+                                                val result = exportConfig(configFileName)
+                                                isExporting = false
+
+                                                result.onSuccess { filePath ->
                                                     snackbarHostState.showSnackbar(
-                                                        if (ok) "Configuration saved successfully"
-                                                        else "Failed to save configuration"
+                                                        message = "Config saved successfully!\nLocation: $filePath",
+                                                        duration = SnackbarDuration.Long
+                                                    )
+                                                }.onFailure { error ->
+                                                    snackbarHostState.showSnackbar(
+                                                        message = "Export failed: ${error.message}",
+                                                        duration = SnackbarDuration.Long
                                                     )
                                                 }
+
+                                                showFileNameDialog = false
+                                                configFileName = ""
                                             }
-                                            showFileNameDialog = false
-                                            configFileName = ""
                                         },
-                                        enabled = configFileName.isNotBlank()
-                                    ) { Text("Save") }
+                                        enabled = !isExporting
+                                    ) {
+                                        if (isExporting) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(16.dp),
+                                                strokeWidth = 2.dp,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                        }
+                                        Text(if (isExporting) "Saving..." else "Export")
+                                    }
                                 }
                             }
                         }
@@ -239,16 +333,25 @@ fun SettingsPageContent() {
                 onDismissRequest = { showOpacityDialog = false },
                 modifier = Modifier.padding(vertical = 24.dp)
             ) {
-                Surface(shape = AlertDialogDefaults.shape, tonalElevation = AlertDialogDefaults.TonalElevation) {
+                Surface(
+                    shape = AlertDialogDefaults.shape,
+                    tonalElevation = AlertDialogDefaults.TonalElevation
+                ) {
                     Column(
                         Modifier.padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        Text(stringResource(R.string.overlay_opacity_settings), style = MaterialTheme.typography.headlineSmall)
+                        Text(
+                            stringResource(R.string.overlay_opacity_settings),
+                            style = MaterialTheme.typography.headlineSmall
+                        )
                         Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
                             Column {
-                                Text(stringResource(R.string.overlay_opacity), style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    stringResource(R.string.overlay_opacity),
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
                                 Slider(
                                     value = overlayOpacity,
                                     onValueChange = {
@@ -260,7 +363,10 @@ fun SettingsPageContent() {
                                 )
                             }
                             Column {
-                                Text(stringResource(R.string.shortcut_opacity), style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    stringResource(R.string.shortcut_opacity),
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
                                 Slider(
                                     value = shortcutOpacity,
                                     onValueChange = {

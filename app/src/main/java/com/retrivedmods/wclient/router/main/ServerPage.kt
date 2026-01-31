@@ -39,12 +39,7 @@ data class SubServerInfo(
 )
 
 val servers = listOf(
-    ServerInfo(
-        name = "The Hive",
-        iconRes = R.drawable.hive_icon,
-        address = "geo.hivebedrock.network",
-        port = 19132
-    ),
+
     ServerInfo(
         name = "Lifeboat",
         iconRes = R.drawable.lifeboat_icon,
@@ -55,6 +50,12 @@ val servers = listOf(
         name = "CubeCraft",
         iconRes = R.drawable.cubecraft_icon,
         address = "play.cubecraft.net",
+        port = 19132
+    ),
+    ServerInfo(
+        name = "NetherGames",
+        iconRes = R.drawable.nethergames,
+        address = "play.nethergames.org",
         port = 19132
     ),
     ServerInfo(

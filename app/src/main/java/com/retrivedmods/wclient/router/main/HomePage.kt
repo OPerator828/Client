@@ -21,6 +21,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import android.content.ClipData
+import android.content.ClipboardManager
+import androidx.core.content.getSystemService
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -264,6 +268,7 @@ fun HomePageContent() {
             }
         }
 
+
         if (showConnectionDialog) {
             val ipAddress = remember {
                 runCatching {
@@ -299,7 +304,7 @@ fun HomePageContent() {
                             }
                         }
 
-                        Text("Open Minecraft → Friends → join via LAN. If it doesn’t appear, add a server with this IP and port.", style = MaterialTheme.typography.bodyMedium)
+                        Text("Open Minecraft → Friends → join via LAN. If it doesn't appear, add a server with this IP and port.", style = MaterialTheme.typography.bodyMedium)
 
                         Card(
                             modifier = Modifier.fillMaxWidth(),
@@ -312,7 +317,30 @@ fun HomePageContent() {
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text("IP", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f))
-                                    Text(ipAddress, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(2f))
+                                    Row(
+                                        modifier = Modifier.weight(2f),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(ipAddress, style = MaterialTheme.typography.bodyLarge)
+                                        androidx.compose.material3.IconButton(
+                                            onClick = {
+                                                val clipboard = context.getSystemService<ClipboardManager>()
+                                                val clip = ClipData.newPlainText("IP Address", ipAddress)
+                                                clipboard?.setPrimaryClip(clip)
+                                                coroutineScope.launch {
+                                                    snackbarHostState.showSnackbar("IP copied to clipboard")
+                                                }
+                                            }
+                                        ) {
+                                            Icon(
+                                                Icons.Rounded.ContentCopy,
+                                                contentDescription = "Copy IP",
+                                                modifier = Modifier.size(18.dp),
+                                                tint = WColors.Primary
+                                            )
+                                        }
+                                    }
                                 }
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -320,7 +348,30 @@ fun HomePageContent() {
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text("Port", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold), modifier = Modifier.weight(1f))
-                                    Text("19132", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(2f))
+                                    Row(
+                                        modifier = Modifier.weight(2f),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("19132", style = MaterialTheme.typography.bodyLarge)
+                                        androidx.compose.material3.IconButton(
+                                            onClick = {
+                                                val clipboard = context.getSystemService<ClipboardManager>()
+                                                val clip = ClipData.newPlainText("Port", "19132")
+                                                clipboard?.setPrimaryClip(clip)
+                                                coroutineScope.launch {
+                                                    snackbarHostState.showSnackbar("Port copied to clipboard")
+                                                }
+                                            }
+                                        ) {
+                                            Icon(
+                                                Icons.Rounded.ContentCopy,
+                                                contentDescription = "Copy Port",
+                                                modifier = Modifier.size(18.dp),
+                                                tint = WColors.Primary
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }

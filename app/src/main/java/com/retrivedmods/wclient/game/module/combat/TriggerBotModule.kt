@@ -16,7 +16,7 @@ class TriggerBotModule : Module("trigger_bot", ModuleCategory.Combat) {
     private var cpsValue by intValue("cps", 12, 1..20)
     private var playersOnly by boolValue("players_only", true)
     private var mobsOnly by boolValue("mobs_only", false)
-    private var rangeValue by floatValue("range", 4.0f, 2f..6f)
+    private var rangeValue by floatValue("range", 4.0f, 2f..7f)
     private var lastAttackTime = 0L
 
     override fun beforePacketBound(interceptablePacket: InterceptablePacket) {
@@ -109,7 +109,7 @@ class TriggerBotModule : Module("trigger_bot", ModuleCategory.Combat) {
 
     private fun Player.isBot(): Boolean {
         if (this is LocalPlayer) return false
-        val playerList = session.level.playerMap[this.uuid] ?: return false // Changed: treat unknown players as real players
+        val playerList = session.level.playerMap[this.uuid] ?: return false
         return playerList.name.isBlank()
     }
 }

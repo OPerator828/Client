@@ -1,6 +1,5 @@
 package com.retrivedmods.wclient.game.module.misc
 
-import android.util.Log
 import com.retrivedmods.wclient.game.InterceptablePacket
 import com.retrivedmods.wclient.game.Module
 import com.retrivedmods.wclient.game.ModuleCategory
@@ -8,6 +7,7 @@ import com.retrivedmods.wclient.game.inventory.ContainerInventory
 import com.retrivedmods.wclient.game.inventory.PlayerInventory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.cloudburstmc.protocol.bedrock.data.inventory.ContainerType
@@ -15,465 +15,462 @@ import org.cloudburstmc.protocol.bedrock.data.inventory.ItemData
 import org.cloudburstmc.protocol.bedrock.packet.ContainerClosePacket
 import org.cloudburstmc.protocol.bedrock.packet.ContainerOpenPacket
 import org.cloudburstmc.protocol.bedrock.packet.InventoryContentPacket
-import org.cloudburstmc.protocol.bedrock.packet.NetworkStackLatencyPacket
-import java.util.ArrayDeque
+import org.cloudburstmc.protocol.bedrock.packet.InventorySlotPacket
 import kotlin.random.Random
 
 class ChestStealerModule : Module("ChestStealer", ModuleCategory.Misc) {
     companion object {
-        private const val TAG = "ChestStealer"
+
+
+
+        private val SKYWARS_WEAPONS = setOf(
+            "minecraft:diamond_sword", "minecraft:iron_sword", "minecraft:stone_sword",
+            "minecraft:netherite_sword", "minecraft:golden_sword", "minecraft:wooden_sword",
+            "minecraft:bow", "minecraft:crossbow", "minecraft:trident"
+        )
+
+        private val SKYWARS_ARMOR = setOf(
+
+            "minecraft:diamond_helmet", "minecraft:diamond_chestplate",
+            "minecraft:diamond_leggings", "minecraft:diamond_boots",
+
+            "minecraft:iron_helmet", "minecraft:iron_chestplate",
+            "minecraft:iron_leggings", "minecraft:iron_boots",
+
+            "minecraft:chainmail_helmet", "minecraft:chainmail_chestplate",
+            "minecraft:chainmail_leggings", "minecraft:chainmail_boots",
+
+            "minecraft:golden_helmet", "minecraft:golden_chestplate",
+            "minecraft:golden_leggings", "minecraft:golden_boots",
+
+            "minecraft:leather_helmet", "minecraft:leather_chestplate",
+            "minecraft:leather_leggings", "minecraft:leather_boots",
+
+            "minecraft:netherite_helmet", "minecraft:netherite_chestplate",
+            "minecraft:netherite_leggings", "minecraft:netherite_boots"
+        )
+
+        private val SKYWARS_FOOD = setOf(
+            "minecraft:golden_apple", "minecraft:enchanted_golden_apple",
+            "minecraft:cooked_beef", "minecraft:cooked_porkchop", "minecraft:cooked_chicken",
+            "minecraft:steak", "minecraft:bread", "minecraft:apple", "minecraft:cookie",
+            "minecraft:cooked_mutton", "minecraft:cooked_salmon", "minecraft:cooked_cod",
+            "minecraft:baked_potato", "minecraft:carrot", "minecraft:golden_carrot"
+        )
+
+        private val SKYWARS_BLOCKS = setOf(
+            "minecraft:wool", "minecraft:planks", "minecraft:oak_planks",
+            "minecraft:spruce_planks", "minecraft:birch_planks", "minecraft:jungle_planks",
+            "minecraft:acacia_planks", "minecraft:dark_oak_planks", "minecraft:cobblestone",
+            "minecraft:stone", "minecraft:sandstone", "minecraft:endstone",
+            "minecraft:obsidian", "minecraft:netherrack", "minecraft:glass"
+        )
+
+        private val SKYWARS_PROJECTILES = setOf(
+            "minecraft:arrow", "minecraft:spectral_arrow", "minecraft:tipped_arrow",
+            "minecraft:snowball", "minecraft:egg", "minecraft:ender_pearl"
+        )
+
+        private val SKYWARS_TOOLS = setOf(
+            "minecraft:diamond_pickaxe", "minecraft:iron_pickaxe", "minecraft:stone_pickaxe",
+            "minecraft:diamond_axe", "minecraft:iron_axe", "minecraft:stone_axe",
+            "minecraft:shears", "minecraft:flint_and_steel"
+        )
+
+        private val SKYWARS_POTIONS = setOf(
+            "minecraft:potion", "minecraft:splash_potion", "minecraft:lingering_potion"
+        )
+
+        private val SKYWARS_SPECIAL = setOf(
+            "minecraft:totem_of_undying", "minecraft:elytra", "minecraft:shield",
+            "minecraft:enchanted_book", "minecraft:experience_bottle",
+            "minecraft:tnt", "minecraft:flint_and_steel", "minecraft:lava_bucket",
+            "minecraft:water_bucket", "minecraft:fishing_rod"
+        )
+
+        private val JUNK_ITEMS = setOf(
+            "minecraft:dirt", "minecraft:grass", "minecraft:gravel", "minecraft:sand",
+            "minecraft:stick", "minecraft:bowl", "minecraft:string", "minecraft:feather",
+            "minecraft:leather", "minecraft:rotten_flesh", "minecraft:bone",
+            "minecraft:spider_eye", "minecraft:gunpowder"
+        )
     }
 
-    // Configuration options
+
     private val autoClose by boolValue("Auto Close", true)
-    private val useDelay by boolValue("Use Delay", true)
-    private val minDelay by intValue("Min Delay (ms)", 95, 0..1000)
-    private val maxDelay by intValue("Max Delay (ms)", 103, 0..1000)
-    private val stealMode by enumValue("Steal Mode", StealMode.ALL_ITEMS, StealMode::class.java)
-    private val ignoreJunk by boolValue("Ignore Junk", false)
-    private val maxItemsPerTick by intValue("Max Items Per Tick", 10, 1..10)
-    private val silentMode by boolValue("Silent Mode", false)
-    private val prioritizeValuables by boolValue("Prioritize Valuables", false)
-    private val skipFullStacks by boolValue("Skip Full Stacks", false)
-    private val containerTimeout by intValue("Container Timeout (ms)", 1000, 1000..30000)
+    private val delayMin by intValue("Min Delay (ms)", 0, 0..100)
+    private val delayMax by intValue("Max Delay (ms)", 5, 0..100)
+    private val startDelay by intValue("Start Delay (ms)", 20, 0..200)
+    private val autoEquipArmor by boolValue("Auto Equip Armor", true)
+    private val priorityMode by boolValue("Priority Mode", true)
+
+
     private var currentContainer: ContainerInventory? = null
-    private var isStealingInProgress = false
+    private var inventoryLoaded = false
+    private var stealingJob: Job? = null
     private val coroutineScope = CoroutineScope(Dispatchers.Main)
-    private var currentLatency = 100L
 
     private var totalItemsStolen = 0
     private var totalContainersProcessed = 0
-    private var lastStealTime = 0L
-    private val latencyHistory = ArrayDeque<Long>(10)
-    private var lastLatencyUpdate = 0L
-
-    // Item filtering
-    private val valuableItems = setOf(
-        "minecraft:diamond", "minecraft:emerald", "minecraft:gold_ingot", "minecraft:iron_ingot",
-        "minecraft:diamond_sword", "minecraft:diamond_pickaxe", "minecraft:diamond_axe",
-        "minecraft:diamond_shovel", "minecraft:diamond_hoe", "minecraft:diamond_helmet",
-        "minecraft:diamond_chestplate", "minecraft:diamond_leggings", "minecraft:diamond_boots",
-        "minecraft:netherite_sword", "minecraft:netherite_pickaxe", "minecraft:netherite_axe",
-        "minecraft:netherite_shovel", "minecraft:netherite_hoe", "minecraft:netherite_helmet",
-        "minecraft:netherite_chestplate", "minecraft:netherite_leggings", "minecraft:netherite_boots",
-        "minecraft:enchanted_book", "minecraft:totem_of_undying", "minecraft:elytra",
-        "minecraft:shulker_shell", "minecraft:nether_star", "minecraft:beacon"
-    )
-
-    private val junkItems = setOf(
-        "minecraft:dirt", "minecraft:cobblestone", "minecraft:stone", "minecraft:gravel",
-        "minecraft:sand", "minecraft:wooden_sword", "minecraft:wooden_pickaxe", "minecraft:wooden_axe",
-        "minecraft:wooden_shovel", "minecraft:wooden_hoe", "minecraft:leather_helmet",
-        "minecraft:leather_chestplate", "minecraft:leather_leggings", "minecraft:leather_boots",
-        "minecraft:rotten_flesh", "minecraft:spider_eye", "minecraft:poisonous_potato",
-        "minecraft:stick", "minecraft:bowl", "minecraft:seeds", "minecraft:wheat_seeds"
-    )
-
-    private val foodItems = setOf(
-        "minecraft:bread", "minecraft:apple", "minecraft:golden_apple", "minecraft:enchanted_golden_apple",
-        "minecraft:cooked_beef", "minecraft:cooked_porkchop", "minecraft:cooked_chicken", "minecraft:cooked_salmon",
-        "minecraft:cooked_cod", "minecraft:baked_potato", "minecraft:cookie", "minecraft:cake"
-    )
-
-    private val toolItems = setOf(
-        "minecraft:iron_sword", "minecraft:iron_pickaxe", "minecraft:iron_axe", "minecraft:iron_shovel",
-        "minecraft:golden_sword", "minecraft:golden_pickaxe", "minecraft:golden_axe", "minecraft:golden_shovel",
-        "minecraft:stone_sword", "minecraft:stone_pickaxe", "minecraft:stone_axe", "minecraft:stone_shovel"
-    )
 
     override fun beforePacketBound(interceptablePacket: InterceptablePacket) {
         if (!isEnabled) return
 
         val packet = interceptablePacket.packet
-        when (packet) {
-            is NetworkStackLatencyPacket -> {
-                if (packet.fromServer) {
-                    handleLatencyPacket(packet)
+
+        try {
+            when (packet) {
+                is ContainerOpenPacket -> {
+                    if (isValidChestContainer(packet.type)) {
+                        handleChestOpen(packet)
+                    }
                 }
-            }
-            is ContainerOpenPacket -> {
-                if (isValidChestContainer(packet.type)) {
-                    handleChestOpen(packet)
-                }
-            }
-            is InventoryContentPacket -> {
-                if (currentContainer != null && packet.containerId == currentContainer!!.containerId) {
-                    Log.d(TAG, "Received InventoryContentPacket for our container ${packet.containerId}")
-                    currentContainer!!.onPacketBound(packet)
-                    if (!isStealingInProgress) {
-                        Log.d(TAG, "Starting stealing process with delay...")
-                        coroutineScope.launch {
-                            delay(50)
-                            if (!isStealingInProgress) {
-                                startStealing()
+
+                is InventoryContentPacket -> {
+                    val container = currentContainer
+                    if (container != null && packet.containerId == container.containerId) {
+                        try {
+                            container.onPacketBound(packet)
+                            inventoryLoaded = true
+
+                            if (stealingJob == null || stealingJob?.isActive == false) {
+                                stealingJob = coroutineScope.launch {
+                                    delay(startDelay.toLong())
+                                    if (currentContainer != null && inventoryLoaded && isEnabled && isSessionCreated) {
+                                        startStealing()
+                                    }
+                                }
                             }
+                        } catch (e: Exception) {
+                            // Ignore
                         }
-                    } else {
-                        Log.d(TAG, "Stealing already in progress, ignoring packet")
+                    }
+                }
+
+                is InventorySlotPacket -> {
+                    val container = currentContainer
+                    if (container != null && packet.containerId == container.containerId) {
+                        try {
+                            if (packet.slot < container.content.size) {
+                                container.content[packet.slot] = packet.item
+                            }
+                        } catch (e: Exception) {
+                            // Ignore
+                        }
+                    }
+                }
+
+                is ContainerClosePacket -> {
+                    if (currentContainer != null && packet.id.toInt() == currentContainer!!.containerId) {
+                        cleanup()
                     }
                 }
             }
-            is ContainerClosePacket -> {
-                if (currentContainer != null && packet.id.toInt() == currentContainer!!.containerId) {
-                    cleanup()
-                }
-            }
-        }
-    }
-
-    private fun handleLatencyPacket(packet: NetworkStackLatencyPacket) {
-        if (!useDelay) return
-
-        val currentTime = System.currentTimeMillis()
-        if (currentTime - lastLatencyUpdate > 1000) {
-            val latency = (currentTime - (packet.timestamp / 1_000_000)).coerceAtLeast(1L)
-            latencyHistory.offer(latency)
-            if (latencyHistory.size > 10) {
-                latencyHistory.poll()
-            }
-            currentLatency = if (latencyHistory.isEmpty()) {
-                100L
-            } else {
-                latencyHistory.average().toLong()
-            }
-            lastLatencyUpdate = currentTime
+        } catch (e: Exception) {
+            // Ignore
         }
     }
 
     private fun isValidChestContainer(type: ContainerType): Boolean {
         return when (type) {
-            ContainerType.CONTAINER,
-            ContainerType.MINECART_CHEST,
-            ContainerType.CHEST_BOAT,
-            ContainerType.HOPPER,
-            ContainerType.DISPENSER,
-            ContainerType.DROPPER -> true
-            else -> {
-                Log.d(TAG, "Unknown container type: $type")
-                false
-            }
+            ContainerType.CONTAINER, ContainerType.MINECART_CHEST,
+            ContainerType.CHEST_BOAT, ContainerType.HOPPER,
+            ContainerType.DISPENSER, ContainerType.DROPPER -> true
+            else -> false
         }
     }
 
     private fun handleChestOpen(packet: ContainerOpenPacket) {
-        Log.d(TAG, "Container opened: ID=${packet.id}, Type=${packet.type}")
+        cleanup()
         currentContainer = ContainerInventory(packet.id.toInt(), packet.type)
-        isStealingInProgress = false
+        inventoryLoaded = false
     }
 
     private fun startStealing() {
-        if (isStealingInProgress || currentContainer == null) {
-            Log.d(TAG, "Cannot start stealing - inProgress: $isStealingInProgress, container: ${currentContainer != null}")
-            return
-        }
+        if (!isSessionCreated) return
+        val container = currentContainer ?: return
+        if (!inventoryLoaded) return
 
-        if (!isEnabled) {
-            Log.d(TAG, "ChestStealer is not enabled, skipping")
-            return
-        }
+        val startTime = System.currentTimeMillis()
 
-        Log.d(TAG, "Starting stealing process - autoClose: $autoClose, useDelay: $useDelay, mode: $stealMode")
-        isStealingInProgress = true
-        lastStealTime = System.currentTimeMillis()
-        coroutineScope.launch {
+        stealingJob = coroutineScope.launch {
             try {
-                stealAllItems()
+                val itemsStolen = stealAllItems(container)
+                totalItemsStolen += itemsStolen
+
+                val totalTime = System.currentTimeMillis() - startTime
+                totalContainersProcessed++
+
+
+                if (autoEquipArmor && isSessionCreated && itemsStolen > 0) {
+                    delay(50)
+                    equipBestArmor()
+                }
+
                 if (autoClose) {
-                    Log.d(TAG, "Auto-closing chest")
+                    delay(30)
                     closeChest()
-                } else {
-                    Log.d(TAG, "Not auto-closing chest")
-                    isStealingInProgress = false
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error during stealing", e)
-                isStealingInProgress = false
                 cleanup()
             }
         }
     }
 
-    private suspend fun stealAllItems() {
-        val container = currentContainer ?: return
+    private suspend fun stealAllItems(container: ContainerInventory): Int {
+        if (!isSessionCreated) return 0
+
         val playerInventory = session.localPlayer.inventory
-        var itemsStolen = 0
-        var itemsSkipped = 0
+        var totalStolen = 0
 
-        Log.d(TAG, "Starting to steal from container with ${container.content.size} slots")
 
-        container.content.forEachIndexed { index, item ->
-            Log.d(TAG, "Slot $index: ${item.definition?.identifier ?: "AIR"} x${item.count} (valid: ${item.isValid}) (isAir: ${item == ItemData.AIR})")
+        val itemsToSteal = mutableListOf<Triple<Int, ItemData, Int>>()
+
+        for (containerSlot in container.content.indices) {
+            val item = container.content[containerSlot]
+            if (item == null || item == ItemData.AIR || item.count <= 0) continue
+
+            val priority = getItemPriority(item)
+            if (priority > 0) {
+                itemsToSteal.add(Triple(containerSlot, item, priority))
+            }
         }
 
-        Log.d(TAG, "Container content array size: ${container.content.size}")
-        Log.d(TAG, "Container content is empty: ${container.content.isEmpty()}")
-        Log.d(TAG, "Container content all AIR: ${container.content.all { it == ItemData.AIR }}")
 
-        val slotsToProcess = if (prioritizeValuables) {
-            val slotPriorities = mutableListOf<Pair<Int, Int>>()
-
-            container.content.forEachIndexed { index, item ->
-                if (shouldStealItem(item)) {
-                    val priority = getItemPriority(item)
-                    slotPriorities.add(index to priority)
-                }
-            }
-
-            val sortedSlots = slotPriorities.sortedByDescending { it.second }.map { it.first }
-
-            Log.d(TAG, "Prioritized processing: ${sortedSlots.size} slots sorted by priority")
-            sortedSlots
-        } else {
-            container.content.indices.filter { shouldStealItem(container.content[it]) }
+        if (priorityMode) {
+            itemsToSteal.sortByDescending { it.third }
         }
 
-        Log.d(TAG, "Starting main stealing loop for ${slotsToProcess.size} slots")
 
-        var itemsProcessedThisTick = 0
-        val startTime = System.currentTimeMillis()
+        for ((containerSlot, item, priority) in itemsToSteal) {
+            if (!isEnabled) break
 
-        for (slot in slotsToProcess) {
-            if (System.currentTimeMillis() - startTime > containerTimeout) {
-                Log.d(TAG, "Container timeout reached, stopping")
-                break
-            }
-            Log.d(TAG, "Processing slot $slot")
-
-            if (!isEnabled || (!isStealingInProgress && autoClose)) {
-                Log.d(TAG, "Stopping steal loop - enabled: $isEnabled, stealing: $isStealingInProgress, autoClose: $autoClose")
+            val emptySlots = playerInventory.content.count { it == ItemData.AIR }
+            if (emptySlots == 0) {
                 break
             }
 
-            val item = container.content[slot]
-            Log.d(TAG, "Slot $slot item: ${item.definition?.identifier ?: "AIR"} x${item.count} valid:${item.isValid} isAir:${item == ItemData.AIR}")
+            val targetSlot = findTargetSlot(item, playerInventory)
+            if (targetSlot == null) continue
 
-            if (shouldStealItem(item)) {
-                Log.d(TAG, "Item in slot $slot passed validation!")
-                Log.d(TAG, "Found item in slot $slot: ${item.definition?.identifier ?: "unknown"} x${item.count}")
-
-                val emptySlot = findBestSlotForItem(item, playerInventory)
-                Log.d(TAG, "Player inventory slot search result: $emptySlot")
-
-                for (i in 0 until minOf(9, playerInventory.content.size)) {
-                    val invItem = playerInventory.content[i]
-                    if (invItem != ItemData.AIR) {
-                        Log.d(TAG, "Player slot $i: ${invItem.definition?.identifier ?: "unknown"} x${invItem.count}")
-                    } else {
-                        Log.d(TAG, "Player slot $i: AIR")
-                    }
-                }
-
-                if (emptySlot != null) {
-                    Log.d(TAG, "Found empty slot $emptySlot in player inventory")
-                    try {
-                        Log.d(TAG, "Attempting to move item from container slot $slot to player slot $emptySlot")
-                        Log.d(TAG, "Server authoritative inventories: ${session.localPlayer.inventoriesServerAuthoritative}")
-
-                        val originalContainerItem = container.content[slot]
-                        val originalPlayerItem = playerInventory.content[emptySlot]
-
-                        Log.d(TAG, "Original container item: ${originalContainerItem.definition?.identifier ?: "unknown"} x${originalContainerItem.count}")
-                        Log.d(TAG, "Original player item: ${originalPlayerItem.definition?.identifier ?: "AIR"}")
-
-                        val movePacket = container.moveItem(
-                            slot, emptySlot, playerInventory,
-                            if (session.localPlayer.inventoriesServerAuthoritative) session.localPlayer.inventory.getRequestId() else Int.MAX_VALUE
-                        )
-
-                        session.serverBound(movePacket)
-                        Log.d(TAG, "Sent move packet directly to server")
-
-                        val responseDelay = if (useDelay) calculateDelay().coerceAtMost(500L) else 200L
-                        delay(responseDelay)
-
-                        val containerSlotAfterMove = container.content[slot]
-                        val playerSlotAfterMove = playerInventory.content[emptySlot]
-
-                        Log.d(TAG, "After move - container item: ${containerSlotAfterMove.definition?.identifier ?: "AIR"} x${containerSlotAfterMove.count}")
-                        Log.d(TAG, "After move - player item: ${playerSlotAfterMove.definition?.identifier ?: "AIR"} x${playerSlotAfterMove.count}")
-
-                        val moveSuccessful = (containerSlotAfterMove == ItemData.AIR || containerSlotAfterMove.count < item.count) &&
-                                (playerSlotAfterMove.definition?.identifier == item.definition?.identifier)
-
-                        if (moveSuccessful) {
-                            itemsStolen++
-                            itemsProcessedThisTick++
-                            Log.d(TAG, "Successfully moved item from slot $slot to player slot $emptySlot")
-                        } else {
-                            itemsSkipped++
-                            Log.d(TAG, "Move failed for slot $slot - container: ${containerSlotAfterMove.definition?.identifier ?: "AIR"}, player: ${playerSlotAfterMove.definition?.identifier ?: "AIR"}")
-                        }
-
-                        if (itemsProcessedThisTick >= maxItemsPerTick) {
-                            Log.d(TAG, "Reached max items per tick ($maxItemsPerTick), adding delay")
-                            if (useDelay) {
-                                val delay = calculateDelay()
-                                delay(delay)
-                            }
-                            itemsProcessedThisTick = 0
-                        } else if (useDelay) {
-                            delay(25L)
-                        }
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Failed to move item from slot $slot", e)
-                        itemsSkipped++
-                        continue
-                    }
+            try {
+                val requestId = if (session.localPlayer.inventoriesServerAuthoritative) {
+                    playerInventory.getRequestId()
                 } else {
-                    Log.d(TAG, "No empty slots available in player inventory, stopping")
-                    break
+                    Int.MAX_VALUE
                 }
-            } else {
-                if (item == ItemData.AIR) {
-                    Log.d(TAG, "Skipping slot $slot: item is AIR")
-                } else if (item.count <= 0) {
-                    Log.d(TAG, "Skipping slot $slot: item count is ${item.count}")
-                    itemsSkipped++
-                } else if (!item.isValid) {
-                    Log.d(TAG, "Skipping slot $slot: item is not valid (${item.definition?.identifier ?: "unknown"})")
-                    itemsSkipped++
-                } else {
-                    Log.d(TAG, "Skipping slot $slot: unknown reason (${item.definition?.identifier ?: "unknown"} x${item.count} valid:${item.isValid})")
-                    itemsSkipped++
+
+                val movePacket = container.moveItem(
+                    containerSlot,
+                    targetSlot,
+                    playerInventory,
+                    requestId
+                )
+
+                session.serverBound(movePacket)
+                totalStolen++
+
+
+                if (delayMax > 0) {
+                    delay(Random.nextLong(delayMin.toLong(), delayMax.toLong()))
                 }
+
+            } catch (e: Exception) {
+                continue
             }
         }
 
-        val stealTime = System.currentTimeMillis() - lastStealTime
-        totalItemsStolen += itemsStolen
-        totalContainersProcessed++
-
-        Log.d(TAG, "Stealing completed: $itemsStolen stolen, $itemsSkipped skipped in ${stealTime}ms")
-        Log.d(TAG, "Total stats: $totalItemsStolen items from $totalContainersProcessed containers")
-
-        if (!silentMode && itemsStolen > 0) {
-            session.displayClientMessage("§l§b[ChestStealer] §r§7Stole §a$itemsStolen §7items in §e${stealTime}ms")
-        }
-    }
-
-    private fun shouldStealItem(item: ItemData): Boolean {
-        if (item == ItemData.AIR || item.count <= 0 || !item.isValid) {
-            return false
-        }
-
-        val identifier = item.definition?.identifier ?: return false
-
-        return when (stealMode) {
-            StealMode.ALL_ITEMS -> {
-                if (ignoreJunk) !junkItems.contains(identifier) else true
-            }
-            StealMode.VALUABLE_ONLY -> {
-                valuableItems.contains(identifier)
-            }
-            StealMode.TOOLS_AND_WEAPONS -> {
-                toolItems.contains(identifier) || valuableItems.contains(identifier)
-            }
-            StealMode.FOOD_ONLY -> {
-                foodItems.contains(identifier)
-            }
-            StealMode.NO_JUNK -> {
-                !junkItems.contains(identifier)
-            }
-            StealMode.CUSTOM_FILTER -> {
-                valuableItems.contains(identifier) || toolItems.contains(identifier) || foodItems.contains(identifier)
-            }
-        }
-    }
-
-    private fun calculateDelay(): Long {
-        val baseDelay = Random.nextLong(minDelay.toLong(), maxDelay.toLong())
-        val latencyFactor = if (currentLatency > 0) (currentLatency * 0.3).toLong() else 0L
-        return (baseDelay + latencyFactor).coerceAtLeast(10L)
-    }
-
-    private fun findBestSlotForItem(item: ItemData, playerInventory: PlayerInventory): Int? {
-        val identifier = item.definition?.identifier
-
-        if (!skipFullStacks && identifier != null) {
-            for (i in 0 until 36) {
-                val invItem = playerInventory.content[i]
-                if (invItem.definition?.identifier == identifier &&
-                    invItem.count < 64 &&
-                    invItem.count + item.count <= 64) {
-                    Log.d(TAG, "Found stackable slot $i for ${identifier}")
-                    return i
-                }
-            }
-        }
-
-        return playerInventory.findEmptySlot()
+        return totalStolen
     }
 
     private fun getItemPriority(item: ItemData): Int {
         val identifier = item.definition?.identifier ?: return 0
 
+
+        if (JUNK_ITEMS.contains(identifier)) return 0
+
+
         return when {
-            valuableItems.contains(identifier) -> 100
-            toolItems.contains(identifier) -> 50
-            foodItems.contains(identifier) -> 30
-            junkItems.contains(identifier) -> 1
-            else -> 10
+            SKYWARS_WEAPONS.contains(identifier) -> 1000
+            SKYWARS_ARMOR.contains(identifier) -> 900
+            SKYWARS_SPECIAL.contains(identifier) -> 850
+            SKYWARS_FOOD.contains(identifier) -> 800
+            SKYWARS_PROJECTILES.contains(identifier) -> 750
+            SKYWARS_TOOLS.contains(identifier) -> 700
+            SKYWARS_POTIONS.contains(identifier) -> 650
+            SKYWARS_BLOCKS.contains(identifier) -> 600
+            item.tag != null && item.tag.toString().contains("ench", ignoreCase = true) -> 950
+            else -> 0
         }
+    }
+
+    private suspend fun equipBestArmor() {
+        if (!isSessionCreated) return
+
+        val playerInventory = session.localPlayer.inventory
+
+
+        val armorSlots = mapOf(
+            "helmet" to 36,
+            "chestplate" to 37,
+            "leggings" to 38,
+            "boots" to 39
+        )
+
+        for ((armorType, armorSlotIndex) in armorSlots) {
+            try {
+                val currentArmor = playerInventory.content.getOrNull(armorSlotIndex)
+                val currentTier = getArmorTier(currentArmor)
+
+                var bestSlot = -1
+                var bestTier = currentTier
+
+                for (slot in 0 until 36) {
+                    val item = playerInventory.content.getOrNull(slot) ?: continue
+                    if (item == ItemData.AIR) continue
+
+                    val identifier = item.definition?.identifier ?: continue
+
+                    if (identifier.contains(armorType, ignoreCase = true)) {
+                        val tier = getArmorTier(item)
+
+                        if (tier > bestTier) {
+                            bestTier = tier
+                            bestSlot = slot
+                        }
+                    }
+                }
+
+                if (bestSlot != -1) {
+                    try {
+                        val requestId = if (session.localPlayer.inventoriesServerAuthoritative) {
+                            playerInventory.getRequestId()
+                        } else {
+                            Int.MAX_VALUE
+                        }
+
+                        val movePacket = playerInventory.moveItem(
+                            bestSlot,
+                            armorSlotIndex,
+                            playerInventory,
+                            requestId
+                        )
+
+                        session.serverBound(movePacket)
+
+                        if (delayMax > 0) {
+                            delay(Random.nextLong(delayMin.toLong(), delayMax.toLong()))
+                        }
+                    } catch (e: Exception) {
+                    }
+                }
+
+            } catch (e: Exception) {
+
+            }
+        }
+    }
+
+    private fun getArmorTier(item: ItemData?): Int {
+        if (item == null || item == ItemData.AIR) return 0
+
+        val identifier = item.definition?.identifier ?: return 0
+
+        val baseTier = when {
+            identifier.contains("netherite") -> 5
+            identifier.contains("diamond") -> 4
+            identifier.contains("iron") -> 3
+            identifier.contains("chainmail") -> 2
+            identifier.contains("golden") -> 2
+            identifier.contains("leather") -> 1
+            else -> 0
+        }
+
+        return try {
+            val hasEnchants = item.tag?.toString()?.contains("ench", ignoreCase = true) == true
+            if (hasEnchants) baseTier + 1 else baseTier
+        } catch (e: Exception) {
+            baseTier
+        }
+    }
+
+    private fun findTargetSlot(item: ItemData, playerInventory: PlayerInventory): Int? {
+        val identifier = item.definition?.identifier
+
+
+        if (identifier != null) {
+            for (i in 9 until 36) {
+                val invItem = playerInventory.content[i]
+                if (invItem != ItemData.AIR &&
+                    invItem.definition?.identifier == identifier &&
+                    invItem.count < 64) {
+                    return i
+                }
+            }
+
+            for (i in 0 until 9) {
+                val invItem = playerInventory.content[i]
+                if (invItem != ItemData.AIR &&
+                    invItem.definition?.identifier == identifier &&
+                    invItem.count < 64) {
+                    return i
+                }
+            }
+        }
+
+
+        for (i in 9 until 36) {
+            if (playerInventory.content[i] == ItemData.AIR) {
+                return i
+            }
+        }
+
+
+        for (i in 0 until 9) {
+            if (playerInventory.content[i] == ItemData.AIR) {
+                return i
+            }
+        }
+
+        return null
     }
 
     private suspend fun closeChest() {
         val container = currentContainer ?: return
+
         try {
             val closePacket = ContainerClosePacket().apply {
                 id = container.containerId.toByte()
-                isServerInitiated = false
                 type = container.type
             }
+
             session.serverBound(closePacket)
-            Log.d(TAG, "Chest closed automatically")
+            delay(30)
+        } catch (e: Exception) {
+
         } finally {
             cleanup()
         }
     }
 
     private fun cleanup() {
+        stealingJob?.cancel()
+        stealingJob = null
         currentContainer = null
-        isStealingInProgress = false
-    }
-
-    private fun resetLatencyTracking() {
-        currentLatency = 100L
-        latencyHistory.clear()
-        lastLatencyUpdate = 0L
-    }
-
-    private fun resetStatistics() {
-        totalItemsStolen = 0
-        totalContainersProcessed = 0
-        lastStealTime = 0L
+        inventoryLoaded = false
     }
 
     override fun onEnabled() {
         super.onEnabled()
-        resetStatistics()
-        if (!silentMode && isSessionCreated) {
-            session.displayClientMessage("§l§b[ChestStealer] §r§7Mode: §a${stealMode.name.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }}")
-        }
+        totalItemsStolen = 0
+        totalContainersProcessed = 0
     }
 
     override fun onDisabled() {
         super.onDisabled()
         cleanup()
-        resetLatencyTracking()
 
-        if (!silentMode && isSessionCreated && totalContainersProcessed > 0) {
-            session.displayClientMessage("§l§b[ChestStealer] §r§7Final Stats: §a$totalItemsStolen §7items from §e$totalContainersProcessed §7containers")
-        }
-
-        resetStatistics()
-    }
-
-    enum class StealMode {
-        ALL_ITEMS,
-        VALUABLE_ONLY,
-        TOOLS_AND_WEAPONS,
-        FOOD_ONLY,
-        NO_JUNK,
-        CUSTOM_FILTER
+        totalItemsStolen = 0
+        totalContainersProcessed = 0
     }
 }

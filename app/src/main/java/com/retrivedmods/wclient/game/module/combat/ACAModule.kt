@@ -22,7 +22,7 @@ class ACAModule : Module("ACA", ModuleCategory.Combat) {
     private var tpSpeed by intValue("tp_speed", 150, 50..2000)
     private var tpYLevel by intValue("yOffset", 0, -10..10)
 
-    private var distanceToKeep by floatValue("keep_distance", 2.0f, 1f..5f)
+    private var distanceToKeep by floatValue("keep_distance", 2.0f, 1f..10f)
 
     private var lastAttackTime = 0L
     private var tpCooldown = 0L

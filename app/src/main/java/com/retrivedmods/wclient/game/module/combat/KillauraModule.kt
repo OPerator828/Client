@@ -4,6 +4,7 @@ import com.retrivedmods.wclient.game.InterceptablePacket
 import com.retrivedmods.wclient.game.Module
 import com.retrivedmods.wclient.game.ModuleCategory
 import com.retrivedmods.wclient.game.entity.*
+import com.retrivedmods.wclient.game.friend.FriendManager
 import org.cloudburstmc.math.vector.Vector3f
 import org.cloudburstmc.protocol.bedrock.packet.MovePlayerPacket
 import org.cloudburstmc.protocol.bedrock.packet.PlayerAuthInputPacket
@@ -12,25 +13,26 @@ import kotlin.math.sin
 
 class KillauraModule : Module("killaura", ModuleCategory.Combat) {
 
-
-
+    private var rangeValue by floatValue("range", 7f, 2f..10f)
+    private var cpsValue by intValue("cps", 20, 5..30)
+    private var packets by intValue("packets", 1, 1..10)
     private var playersOnly by boolValue("players_only", true)
     private var mobsOnly by boolValue("mobs_only", false)
+    private var antiBot by boolValue("anti_bot", true)
 
-    private var tpAuraEnabled by boolValue("tp_aura", true)
-    private var teleportBehind by boolValue("tp_behind", true)
-    private var criticalHits by boolValue("critical_hit", true)
-    private var strafe by boolValue("strafe", false)
 
-    private var rangeValue by floatValue("range", 9.5f, 2f..16f)
-    private var cpsValue by intValue("cps", 20, 5..30)
-
+    private var tpAuraEnabled by boolValue("tp_aura", false)
+    private var teleportBehind by boolValue("tp_behind", false)
     private var tpSpeed by intValue("tp_speed", 100, 10..500)
     private var tpYOffset by intValue("tp_y_offset", 1, -10..10)
-    private var keepDistance by floatValue("keep_distance", 1.2f, 0.5f..5f)
+    private var keepDistance by floatValue("keep_distance", 1.2f, 0.5f..10f)
 
+
+    private var strafe by boolValue("strafe", false)
     private val strafeSpeed by floatValue("strafe_speed", 2.5f, 1f..4f)
     private val strafeRadius by floatValue("strafe_radius", 2.5f, 1f..6f)
+
+
 
 
 
@@ -39,14 +41,35 @@ class KillauraModule : Module("killaura", ModuleCategory.Combat) {
     private var strafeAngle = 0f
 
 
+
+    private fun Player.isBot(): Boolean {
+
+        if (this is LocalPlayer) return false
+
+
+        val playerListEntry = session.level.playerMap[this.uuid] ?: return true
+
+
+        val name = playerListEntry.name?.toString() ?: ""
+        if (name.isBlank()) return true
+
+
+        val xuid = playerListEntry.xuid ?: ""
+        if (xuid.isEmpty() || xuid == "0") return true
+
+        if (name.trim().isEmpty()) return true
+
+        return false
+    }
+
+
+
     override fun beforePacketBound(interceptablePacket: InterceptablePacket) {
         if (!isEnabled) return
-        val packet = interceptablePacket.packet
-        if (packet !is PlayerAuthInputPacket) return
+        if (interceptablePacket.packet !is PlayerAuthInputPacket) return
 
         val now = System.currentTimeMillis()
         val delay = 1000L / cpsValue
-
         if (now - lastAttackTime < delay) return
 
         val targets = searchForTargets()
@@ -54,29 +77,49 @@ class KillauraModule : Module("killaura", ModuleCategory.Combat) {
 
         for (target in targets) {
 
+            if (target is Player && FriendManager.isFriend(target.uuid)) continue
+
             if (tpAuraEnabled && now - tpCooldown >= tpSpeed) {
                 teleportTo(target)
                 tpCooldown = now
             }
 
-            if (criticalHits) triggerCriticalHit()
 
-            session.localPlayer.attack(target)
+            repeat(packets) {
+                session.localPlayer.attack(target)
+            }
 
             if (strafe) strafeAroundTarget(target)
-
-            lastAttackTime = now
         }
+
+        lastAttackTime = now
     }
 
-    /* ===================== CORE LOGIC ===================== */
 
     private fun searchForTargets(): List<Entity> {
         val player = session.localPlayer
         return session.level.entityMap.values
-            .filter { it.distance(player) <= rangeValue && it.isTarget() }
+            .filter { it.distance(player) <= rangeValue }
+            .filter { it.isTarget() }
             .sortedBy { it.distance(player) }
     }
+
+    private fun Entity.isTarget(): Boolean {
+        return when (this) {
+            is LocalPlayer -> false
+            is Player -> {
+                if (!playersOnly) return false
+
+
+                if (antiBot && isBot()) return false
+
+                true
+            }
+            is EntityUnknown -> mobsOnly && isMob()
+            else -> false
+        }
+    }
+
 
     private fun teleportTo(entity: Entity) {
         val player = session.localPlayer
@@ -112,6 +155,7 @@ class KillauraModule : Module("killaura", ModuleCategory.Combat) {
         )
     }
 
+
     private fun strafeAroundTarget(entity: Entity) {
         val pos = entity.vec3Position
         strafeAngle += strafeSpeed
@@ -132,32 +176,6 @@ class KillauraModule : Module("killaura", ModuleCategory.Combat) {
         )
     }
 
-    private fun triggerCriticalHit() {
-        val player = session.localPlayer
-        session.clientBound(
-            MovePlayerPacket().apply {
-                runtimeEntityId = player.runtimeEntityId
-                position = player.vec3Position.add(0f, 0.1f, 0f)
-                rotation = player.vec3Rotation
-                mode = MovePlayerPacket.Mode.NORMAL
-                onGround = false
-                tick = player.tickExists
-            }
-        )
-    }
-
-
-    private fun Entity.isTarget(): Boolean = when (this) {
-        is LocalPlayer -> false
-        is Player -> playersOnly && !isBot()
-        is EntityUnknown -> mobsOnly && isMob()
-        else -> false
-    }
-
-    private fun Player.isBot(): Boolean {
-        if (this is LocalPlayer) return false
-        return session.level.playerMap[this.uuid]?.name.isNullOrBlank()
-    }
 
     private fun EntityUnknown.isMob(): Boolean {
         return this.identifier in MobList.mobTypes

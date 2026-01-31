@@ -5,13 +5,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.retrivedmods.wclient.overlay.gui.classic.OverlayShortcutButton
 import com.retrivedmods.wclient.util.translatedSelf
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.boolean
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.int
-import kotlinx.serialization.json.put
+import com.retrivedmods.wclient.util.SoundUtil
+import com.retrivedmods.wclient.game.module.misc.ToggleSoundModule
+import kotlinx.serialization.json.*
 
 abstract class Module(
     val name: String,
@@ -29,35 +25,50 @@ abstract class Module(
         get() = _isEnabled
         set(value) {
             _isEnabled = value
-            if (value) {
-                onEnabled()
-            } else {
-                onDisabled()
-            }
+            if (value) onEnabled() else onDisabled()
         }
 
     val isSessionCreated: Boolean
         get() = ::session.isInitialized
 
     var isExpanded by mutableStateOf(false)
-
     var isShortcutDisplayed by mutableStateOf(false)
 
     var shortcutX = 0
-
     var shortcutY = 100
 
     val overlayShortcutButton by lazy { OverlayShortcutButton(this) }
 
     override val values: MutableList<Value<*>> = ArrayList()
 
+
+
     open fun onEnabled() {
         sendToggleMessage(true)
+
+        if (shouldPlayToggleSound()) {
+            SoundUtil.playEnable()
+        }
     }
 
     open fun onDisabled() {
         sendToggleMessage(false)
+
+        if (shouldPlayToggleSound()) {
+            SoundUtil.playDisable()
+        }
     }
+
+    private fun shouldPlayToggleSound(): Boolean {
+        if (this is ToggleSoundModule) return false
+
+        val toggleSoundModule = ModuleManager.modules
+            .firstOrNull { it is ToggleSoundModule } as? ToggleSoundModule
+
+        return toggleSoundModule?.isEnabled == true
+    }
+
+
 
     open fun toJson() = buildJsonObject {
         put("state", isEnabled)
@@ -77,16 +88,16 @@ abstract class Module(
     open fun fromJson(jsonElement: JsonElement) {
         if (jsonElement is JsonObject) {
             isEnabled = (jsonElement["state"] as? JsonPrimitive)?.boolean ?: isEnabled
-            (jsonElement["values"] as? JsonObject)?.let {
-                it.forEach { jsonObject ->
-                    val value = getValue(jsonObject.key) ?: return@forEach
-                    try {
-                        value.fromJson(jsonObject.value)
-                    } catch (e: Throwable) {
-                        value.reset()
-                    }
+
+            (jsonElement["values"] as? JsonObject)?.forEach { (key, json) ->
+                val value = getValue(key) ?: return@forEach
+                try {
+                    value.fromJson(json)
+                } catch (_: Throwable) {
+                    value.reset()
                 }
             }
+
             (jsonElement["shortcut"] as? JsonObject)?.let {
                 shortcutX = (it["x"] as? JsonPrimitive)?.int ?: shortcutX
                 shortcutY = (it["y"] as? JsonPrimitive)?.int ?: shortcutY
@@ -95,17 +106,17 @@ abstract class Module(
         }
     }
 
+
+
     private fun sendToggleMessage(enabled: Boolean) {
-        if (!isSessionCreated) {
-            return
-        }
+        if (!isSessionCreated) return
 
         val stateText = if (enabled) "enabled".translatedSelf else "disabled".translatedSelf
         val status = (if (enabled) "§a" else "§c") + stateText
         val moduleName = name.translatedSelf
-        val message = "§l§c[WClient] §r§7${moduleName} §8» $status"
 
-        session.displayClientMessage(message)
+        session.displayClientMessage(
+            "§l§c[WClient] §r§7$moduleName §8» $status"
+        )
     }
-
 }

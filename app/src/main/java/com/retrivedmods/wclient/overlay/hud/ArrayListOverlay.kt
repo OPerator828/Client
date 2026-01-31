@@ -5,20 +5,24 @@ import com.retrivedmods.wclient.overlay.OverlayWindow
 import com.retrivedmods.wclient.overlay.OverlayManager
 import android.view.WindowManager
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material3.Text
@@ -31,11 +35,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.retrivedmods.wclient.R
 import com.retrivedmods.wclient.game.module.misc.ArrayListModule
 import com.retrivedmods.wclient.ui.theme.WColors
 import com.retrivedmods.wclient.util.translatedSelf
@@ -48,11 +59,13 @@ class ArrayListOverlay : OverlayWindow() {
 
     private val _layoutParams by lazy {
         super.layoutParams.apply {
-            flags = flags or
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            flags =
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+
             width = WindowManager.LayoutParams.WRAP_CONTENT
             height = WindowManager.LayoutParams.WRAP_CONTENT
             gravity = Gravity.TOP or Gravity.END
@@ -76,6 +89,10 @@ class ArrayListOverlay : OverlayWindow() {
     private var spacing by mutableStateOf(2)
     private var fadeAnimation by mutableStateOf(true)
     private var slideAnimation by mutableStateOf(true)
+    private var fontStyle by mutableStateOf(ArrayListModule.FontStyle.NORMAL)
+    private var gradientIntensity by mutableStateOf(1.0f)
+    private var glowEffect by mutableStateOf(false)
+    private var smoothGradient by mutableStateOf(true)
 
     data class ModuleInfo(
         val name: String,
@@ -156,6 +173,22 @@ class ArrayListOverlay : OverlayWindow() {
         fun setSlideAnimation(slide: Boolean) {
             overlayInstance.slideAnimation = slide
         }
+
+        fun setFontStyle(style: ArrayListModule.FontStyle) {
+            overlayInstance.fontStyle = style
+        }
+
+        fun setGradientIntensity(intensity: Float) {
+            overlayInstance.gradientIntensity = intensity
+        }
+
+        fun setGlowEffect(glow: Boolean) {
+            overlayInstance.glowEffect = glow
+        }
+
+        fun setSmoothGradient(smooth: Boolean) {
+            overlayInstance.smoothGradient = smooth
+        }
     }
 
     @Composable
@@ -164,12 +197,22 @@ class ArrayListOverlay : OverlayWindow() {
 
         var rainbowOffset by remember { mutableStateOf(0f) }
 
-        LaunchedEffect(Unit) {
-            while (true) {
-                rainbowOffset += rainbowSpeed * 0.01f
-                if (rainbowOffset > 1f) rainbowOffset = 0f
-                delay(16L)
-            }
+        val infiniteTransition = rememberInfiniteTransition(label = "rainbow")
+        val animatedOffset by infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(
+                    durationMillis = (3000 / rainbowSpeed).toInt(),
+                    easing = LinearEasing
+                ),
+                repeatMode = RepeatMode.Restart
+            ),
+            label = "offset"
+        )
+
+        LaunchedEffect(animatedOffset) {
+            rainbowOffset = animatedOffset
         }
 
         val sortedModules = when (sortMode) {
@@ -185,15 +228,18 @@ class ArrayListOverlay : OverlayWindow() {
             sortedModules.forEachIndexed { index, module ->
                 AnimatedVisibility(
                     visible = true,
-                    enter = if (fadeAnimation) fadeIn(animationSpec = tween(animationSpeed)) else fadeIn(tween(0)) +
-                            if (slideAnimation) slideInHorizontally(animationSpec = tween(animationSpeed)) { it } else slideInHorizontally(tween(0)) { 0 },
-                    exit = if (fadeAnimation) fadeOut(animationSpec = tween(animationSpeed)) else fadeOut(tween(0)) +
-                           if (slideAnimation) slideOutHorizontally(animationSpec = tween(animationSpeed)) { it } else slideOutHorizontally(tween(0)) { 0 }
+                    enter = if (fadeAnimation) fadeIn(animationSpec = tween(animationSpeed, easing = FastOutSlowInEasing)) else fadeIn(tween(0)) +
+                            if (slideAnimation) slideInHorizontally(animationSpec = tween(animationSpeed, easing = FastOutSlowInEasing)) { it } else slideInHorizontally(tween(0)) { 0 } +
+                                    expandVertically(animationSpec = tween(animationSpeed, easing = FastOutSlowInEasing)),
+                    exit = if (fadeAnimation) fadeOut(animationSpec = tween(animationSpeed, easing = FastOutSlowInEasing)) else fadeOut(tween(0)) +
+                            if (slideAnimation) slideOutHorizontally(animationSpec = tween(animationSpeed, easing = FastOutSlowInEasing)) { it } else slideOutHorizontally(tween(0)) { 0 } +
+                                    shrinkVertically(animationSpec = tween(animationSpeed, easing = FastOutSlowInEasing))
                 ) {
                     ModuleItem(
                         module = module,
                         index = index,
                         rainbowOffset = rainbowOffset,
+                        totalModules = sortedModules.size,
                         isLast = index == sortedModules.size - 1
                     )
                 }
@@ -201,48 +247,112 @@ class ArrayListOverlay : OverlayWindow() {
         }
     }
 
-
-
     @Composable
     private fun ModuleItem(
         module: ModuleInfo,
         index: Int,
         rainbowOffset: Float,
+        totalModules: Int,
         isLast: Boolean
     ) {
-        val moduleColor = getModuleColor(index, rainbowOffset)
+        val moduleColor = getModuleColor(index, rainbowOffset, totalModules)
         val borderWidth = if (showBorder) 2.dp else 0.dp
+
+        val fontFamily = when (fontStyle) {
+            ArrayListModule.FontStyle.MINECRAFT -> try {
+                FontFamily(Font(R.font.minecraft))
+            } catch (e: Exception) {
+                FontFamily.Monospace
+            }
+            ArrayListModule.FontStyle.NORMAL -> FontFamily.Default
+        }
+
+        val textShadow = if (glowEffect) {
+            Shadow(
+                color = moduleColor.copy(alpha = 0.8f),
+                offset = Offset(0f, 0f),
+                blurRadius = 8f
+            )
+        } else {
+            Shadow(
+                color = Color.Black.copy(alpha = 0.5f),
+                offset = Offset(2f, 2f),
+                blurRadius = 4f
+            )
+        }
 
         Box(
             modifier = Modifier
                 .padding(bottom = if (!isLast) spacing.dp else 0.dp)
                 .let { modifier ->
-                    if (showBackground) {
+                    if (smoothGradient && colorMode == ArrayListModule.ColorMode.SMOOTH_GRADIENT) {
+                        val gradientColors = getSmoothGradientColors(index, rainbowOffset, totalModules)
+                        modifier.background(
+                            brush = Brush.horizontalGradient(gradientColors),
+                            shape = RoundedCornerShape(4.dp)
+                        )
+                    } else if (showBackground) {
                         modifier
                             .background(
                                 WColors.Surface.copy(alpha = 0.7f),
                                 RoundedCornerShape(4.dp)
                             )
-                            .clip(RoundedCornerShape(4.dp))
                     } else modifier
                 }
+                .clip(RoundedCornerShape(4.dp))
                 .let { modifier ->
                     when (borderStyle) {
-                        ArrayListModule.BorderStyle.LEFT -> modifier.border(
-                            width = borderWidth,
-                            color = moduleColor,
-                            shape = RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp)
-                        )
-                        ArrayListModule.BorderStyle.RIGHT -> modifier.border(
-                            width = borderWidth,
-                            color = moduleColor,
-                            shape = RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp)
-                        )
-                        ArrayListModule.BorderStyle.FULL -> modifier.border(
-                            width = borderWidth,
-                            color = moduleColor,
-                            shape = RoundedCornerShape(4.dp)
-                        )
+                        ArrayListModule.BorderStyle.LEFT -> {
+                            if (smoothGradient && colorMode == ArrayListModule.ColorMode.SMOOTH_GRADIENT) {
+                                val gradientColors = getSmoothGradientColors(index, rainbowOffset, totalModules)
+                                modifier.drawBehind {
+                                    drawRect(
+                                        brush = Brush.verticalGradient(gradientColors),
+                                        size = size.copy(width = borderWidth.toPx())
+                                    )
+                                }
+                            } else {
+                                modifier.border(
+                                    width = borderWidth,
+                                    color = moduleColor,
+                                    shape = RoundedCornerShape(topStart = 4.dp, bottomStart = 4.dp)
+                                )
+                            }
+                        }
+                        ArrayListModule.BorderStyle.RIGHT -> {
+                            if (smoothGradient && colorMode == ArrayListModule.ColorMode.SMOOTH_GRADIENT) {
+                                val gradientColors = getSmoothGradientColors(index, rainbowOffset, totalModules)
+                                modifier.drawBehind {
+                                    drawRect(
+                                        brush = Brush.verticalGradient(gradientColors),
+                                        topLeft = Offset(size.width - borderWidth.toPx(), 0f),
+                                        size = size.copy(width = borderWidth.toPx())
+                                    )
+                                }
+                            } else {
+                                modifier.border(
+                                    width = borderWidth,
+                                    color = moduleColor,
+                                    shape = RoundedCornerShape(topEnd = 4.dp, bottomEnd = 4.dp)
+                                )
+                            }
+                        }
+                        ArrayListModule.BorderStyle.FULL -> {
+                            if (smoothGradient && colorMode == ArrayListModule.ColorMode.SMOOTH_GRADIENT) {
+                                val gradientColors = getSmoothGradientColors(index, rainbowOffset, totalModules)
+                                modifier.border(
+                                    width = borderWidth,
+                                    brush = Brush.sweepGradient(gradientColors),
+                                    shape = RoundedCornerShape(4.dp)
+                                )
+                            } else {
+                                modifier.border(
+                                    width = borderWidth,
+                                    color = moduleColor,
+                                    shape = RoundedCornerShape(4.dp)
+                                )
+                            }
+                        }
                         else -> modifier
                     }
                 }
@@ -250,34 +360,81 @@ class ArrayListOverlay : OverlayWindow() {
         ) {
             Text(
                 text = module.name.translatedSelf,
-                color = moduleColor,
+                color = if (smoothGradient && colorMode == ArrayListModule.ColorMode.SMOOTH_GRADIENT) Color.White else moduleColor,
                 fontSize = fontSize.sp,
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.Medium,
+                fontFamily = fontFamily,
+                style = TextStyle(shadow = textShadow)
             )
         }
     }
 
-    private fun getModuleColor(index: Int, rainbowOffset: Float): Color {
+    private fun getSmoothGradientColors(index: Int, offset: Float, totalModules: Int): List<Color> {
+        val baseColors = listOf(
+            Color(0xFFFF0080), // Hot Pink
+            Color(0xFF8000FF), // Purple
+            Color(0xFF0080FF), // Blue
+            Color(0xFF00FF80), // Cyan
+            Color(0xFF80FF00), // Lime
+            Color(0xFFFFFF00), // Yellow
+            Color(0xFFFF8000), // Orange
+            Color(0xFFFF0000)  // Red
+        )
+
+        val smoothColors = mutableListOf<Color>()
+        val segmentProgress = (offset + index.toFloat() / totalModules.coerceAtLeast(1)) % 1f
+        val colorIndex = (segmentProgress * baseColors.size * gradientIntensity).toInt() % baseColors.size
+        val nextColorIndex = (colorIndex + 1) % baseColors.size
+        val localProgress = (segmentProgress * baseColors.size * gradientIntensity) % 1f
+
+        // Create smooth transition between colors
+        for (i in 0..2) {
+            val currentIndex = (colorIndex + i) % baseColors.size
+            val nextIndex = (currentIndex + 1) % baseColors.size
+            smoothColors.add(lerpColor(baseColors[currentIndex], baseColors[nextIndex], localProgress))
+        }
+
+        return smoothColors
+    }
+
+    private fun getModuleColor(index: Int, rainbowOffset: Float, totalModules: Int): Color {
         return when (colorMode) {
             ArrayListModule.ColorMode.RAINBOW -> {
-                val hue = (rainbowOffset + index * 0.1f) % 1f
-                hsvToRgb(hue, 0.8f, 1f)
+                val hue = (rainbowOffset + index.toFloat() / totalModules.coerceAtLeast(1) * gradientIntensity) % 1f
+                hsvToRgb(hue, 0.9f, 1f)
+            }
+            ArrayListModule.ColorMode.SMOOTH_GRADIENT -> {
+                val progress = (rainbowOffset + index.toFloat() / totalModules.coerceAtLeast(1)) % 1f
+                val hue = progress * 360f
+                hsvToRgb(hue / 360f, 0.85f, 1f)
             }
             ArrayListModule.ColorMode.GRADIENT -> {
-                val progress = index.toFloat() / maxOf(modules.size - 1, 1)
-                lerpColor(WColors.Accent, WColors.Secondary, progress)
+                val progress = index.toFloat() / maxOf(totalModules - 1, 1)
+                lerpColor(Color(0xFFFF0080), Color(0xFF00D4FF), progress)
+            }
+            ArrayListModule.ColorMode.WAVE -> {
+                val wave = (sin((rainbowOffset * 2 * Math.PI + index * 0.3).toFloat()) * 0.5f + 0.5f)
+                hsvToRgb(wave, 0.9f, 1f)
+            }
+            ArrayListModule.ColorMode.PULSE -> {
+                val pulse = abs(sin((rainbowOffset * Math.PI + index * 0.2).toFloat()))
+                Color.White.copy(alpha = 0.5f + pulse * 0.5f)
             }
             ArrayListModule.ColorMode.STATIC -> WColors.Accent
             ArrayListModule.ColorMode.CATEGORY_BASED -> when (modules.getOrNull(index)?.category) {
-                "Combat" -> Color.Red
-                "Movement" -> Color.Blue
-                "Visual" -> Color.Green
-                "Misc" -> Color.Yellow
-                "World" -> Color.Cyan
+                "Combat" -> Color(0xFFFF3333)
+                "Movement" -> Color(0xFF3399FF)
+                "Visual" -> Color(0xFF33FF66)
+                "Misc" -> Color(0xFFFFCC33)
+                "World" -> Color(0xFF33FFFF)
                 else -> WColors.Accent
             }
             ArrayListModule.ColorMode.RANDOM -> {
-                val colors = listOf(Color.Red, Color.Blue, Color.Green, Color.Yellow, Color.Magenta, Color.Cyan)
+                val colors = listOf(
+                    Color(0xFFFF0080), Color(0xFF0080FF),
+                    Color(0xFF00FF80), Color(0xFFFF8000),
+                    Color(0xFF8000FF), Color(0xFFFFFF00)
+                )
                 colors[index % colors.size]
             }
         }
@@ -306,11 +463,12 @@ class ArrayListOverlay : OverlayWindow() {
     }
 
     private fun lerpColor(start: Color, stop: Color, fraction: Float): Color {
+        val f = fraction.coerceIn(0f, 1f)
         return Color(
-            red = start.red + fraction * (stop.red - start.red),
-            green = start.green + fraction * (stop.green - start.green),
-            blue = start.blue + fraction * (stop.blue - start.blue),
-            alpha = start.alpha + fraction * (stop.alpha - start.alpha)
+            red = start.red + f * (stop.red - start.red),
+            green = start.green + f * (stop.green - start.green),
+            blue = start.blue + f * (stop.blue - start.blue),
+            alpha = start.alpha + f * (stop.alpha - start.alpha)
         )
     }
 }

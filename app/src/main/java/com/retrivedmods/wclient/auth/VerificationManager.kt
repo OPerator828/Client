@@ -19,12 +19,9 @@ import java.util.*
 object VerificationManager {
     private const val TAG = "VerifyNet"
     private const val PREFS = "wclient_prefs"
-    private const val KEY_DEVICE_ID = "device_id"
-    private const val KEY_VERIFIED_UNTIL = "verified_until"
-    private const val KEY_CURRENT_TOKEN = "current_token"
+    private const val KEY_WCLIENT_ID = "wclient_id"
 
-
-    private const val BASE_VERIFY_URL = "https://retrivedmods.online/LV1/verify.php"
+    private const val BASE_VERIFY_URL = "https://retrivedmods.online/task/verify.php"
 
     private val client: OkHttpClient = OkHttpClient.Builder()
         .followRedirects(true)
@@ -45,52 +42,67 @@ object VerificationManager {
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    fun getDeviceId(ctx: Context): String {
+    fun getWClientId(ctx: Context): String {
         val p = prefs(ctx)
-        var id = p.getString(KEY_DEVICE_ID, null)
+        var id = p.getString(KEY_WCLIENT_ID, null)
         if (id.isNullOrBlank()) {
-            id = UUID.randomUUID().toString()
-            p.edit().putString(KEY_DEVICE_ID, id).apply()
+            id = "WC-" + UUID.randomUUID().toString().uppercase().replace("-", "").substring(0, 16)
+            p.edit().putString(KEY_WCLIENT_ID, id).apply()
         }
         return id
     }
 
-    private fun setVerifiedUntil(ctx: Context, epochSeconds: Long) {
-        prefs(ctx).edit().putLong(KEY_VERIFIED_UNTIL, epochSeconds).apply()
-    }
-
-    fun getVerifiedUntil(ctx: Context): Long =
-        prefs(ctx).getLong(KEY_VERIFIED_UNTIL, 0L)
-
-    private fun setCurrentToken(ctx: Context, token: String?) {
-        prefs(ctx).edit().putString(KEY_CURRENT_TOKEN, token).apply()
-    }
-
-    fun isAuthorized(ctx: Context): Boolean {
-        val now = System.currentTimeMillis() / 1000L
-        return getVerifiedUntil(ctx) > now
-    }
-
-
-    suspend fun requestVerificationDirect(ctx: Context, short: Boolean = false): Triple<String, String, String> =
+    suspend fun isWhitelisted(ctx: Context, wclientId: String): Boolean =
         withContext(Dispatchers.IO) {
-            val deviceId = getDeviceId(ctx)
-            val payload = JSONObject().put("device_id", deviceId).toString()
+            try {
+                val url = "$BASE_VERIFY_URL?action=check_whitelist&wclient_id=${URLEncoder.encode(wclientId, "utf-8")}"
+                val req = Request.Builder().url(url).get().build()
+
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withContext false
+                    val body = resp.body?.string() ?: return@withContext false
+                    val j = JSONObject(body)
+                    return@withContext j.optBoolean("whitelisted", false)
+                }
+            } catch (t: Throwable) {
+                Log.e(TAG, "Error checking whitelist", t)
+                return@withContext false
+            }
+        }
+
+    suspend fun isVerified(ctx: Context, wclientId: String): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                val url = "$BASE_VERIFY_URL?action=check_verified&wclient_id=${URLEncoder.encode(wclientId, "utf-8")}"
+                val req = Request.Builder().url(url).get().build()
+
+                client.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@withContext false
+                    val body = resp.body?.string() ?: return@withContext false
+                    val j = JSONObject(body)
+                    return@withContext j.optBoolean("verified", false)
+                }
+            } catch (t: Throwable) {
+                Log.e(TAG, "Error checking verification", t)
+                return@withContext false
+            }
+        }
+
+    suspend fun requestVerification(ctx: Context, wclientId: String): String =
+        withContext(Dispatchers.IO) {
+            val payload = JSONObject().put("wclient_id", wclientId).toString()
             val reqBody = payload.toRequestBody(jsonMedia)
-            val url = if (short) "$BASE_VERIFY_URL?action=request&short=1" else "$BASE_VERIFY_URL?action=request"
+            val url = "$BASE_VERIFY_URL?action=request&short=1"
             val req = Request.Builder().url(url).post(reqBody).build()
 
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) throw Exception("Server ${resp.code}")
                 val body = resp.body?.string() ?: throw Exception("Empty response")
                 val j = JSONObject(body)
-                val token = j.optString("token", "")
-                val real = j.optString("real_verify_url", j.optString("verify_url", ""))
-                val verify = j.optString("verify_url", real)
+                val verifyUrl = j.optString("verify_url", "")
 
-                if (token.isBlank() || real.isBlank()) throw Exception("Invalid response")
-                setCurrentToken(ctx, token)
-                return@withContext Triple(token, real, verify)
+                if (verifyUrl.isBlank()) throw Exception("Invalid response")
+                return@withContext verifyUrl
             }
         }
 
@@ -133,37 +145,32 @@ object VerificationManager {
         }
     }
 
-    fun pollTokenStatus(ctx: Context, token: String, onComplete: (Boolean, String?) -> Unit) {
+    fun pollVerificationStatus(ctx: Context, wclientId: String, onComplete: (Boolean, String?) -> Unit) {
         scope.launch {
             try {
                 val pollIntervalMs = 3000L
                 val start = System.currentTimeMillis()
                 val maxDurationMs = 4L * 60L * 60L * 1000L + 10_000L
+
                 while (true) {
-                    val url = "$BASE_VERIFY_URL?action=status&token=${URLEncoder.encode(token, "utf-8")}"
+                    val url = "$BASE_VERIFY_URL?action=check_verified&wclient_id=${URLEncoder.encode(wclientId, "utf-8")}"
                     val req = Request.Builder().url(url).get().build()
+
                     client.newCall(req).execute().use { resp ->
                         if (!resp.isSuccessful) {
                             Log.d(TAG, "Status call returned ${resp.code}; will retry")
                         } else {
                             val s = resp.body?.string() ?: ""
                             val j = JSONObject(s)
-                            val exists = j.optBoolean("exists", false)
                             val verified = j.optBoolean("verified", false)
-                            val expiresAt = j.optLong("expires_at", 0L)
-                            if (!exists) {
-                                withContext(Dispatchers.Main) { onComplete(false, "token expired or not found") }
-                                return@launch
-                            }
+
                             if (verified) {
-                                val verifiedUntil = if (expiresAt > 0) expiresAt else (System.currentTimeMillis() / 1000L + 4 * 60 * 60)
-                                setVerifiedUntil(ctx, verifiedUntil)
-                                setCurrentToken(ctx, null)
                                 withContext(Dispatchers.Main) { onComplete(true, null) }
                                 return@launch
                             }
                         }
                     }
+
                     if (System.currentTimeMillis() - start > maxDurationMs) {
                         withContext(Dispatchers.Main) { onComplete(false, "timed out") }
                         return@launch

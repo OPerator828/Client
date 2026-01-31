@@ -16,7 +16,7 @@ class PlayerTPModule : Module("PlayerTP", ModuleCategory.Motion) {
 
     private var maxRange by floatValue("Range", 500f, 10f..500f)
     private var grabSpeed by floatValue("Speed", 8.0f, 1f..50f)
-    private var yOffset by floatValue("YOffset", 1.0f, -5f..5f)
+    private var yOffset by floatValue("YOffset", 1.0f, -10f..10f)
 
     private var jitterEnabled by boolValue("Jitter Movement", true)
     private var derpEnabled by boolValue("Derp", true)

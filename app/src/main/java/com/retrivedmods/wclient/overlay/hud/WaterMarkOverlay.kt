@@ -4,35 +4,31 @@ import android.view.Gravity
 import android.view.WindowManager
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.*
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.BaselineShift
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.retrivedmods.wclient.BuildConfig
+import com.retrivedmods.wclient.R
 import com.retrivedmods.wclient.overlay.OverlayManager
 import com.retrivedmods.wclient.overlay.OverlayWindow
 import com.retrivedmods.wclient.game.module.misc.WaterMarkModule
-import com.retrivedmods.wclient.ui.theme.WColors
 import kotlinx.coroutines.delay
 import kotlin.math.sin
+import kotlin.math.PI
 
 class WaterMarkOverlay : OverlayWindow() {
 
@@ -53,20 +49,12 @@ class WaterMarkOverlay : OverlayWindow() {
     override val layoutParams: WindowManager.LayoutParams
         get() = _layoutParams
 
-
     private var customText by mutableStateOf("WClient")
     private var showVersion by mutableStateOf(true)
     private var position by mutableStateOf(WaterMarkModule.Position.TOP_LEFT)
-    private var fontSize by mutableStateOf(18)
-    private var rainbowSpeed by mutableStateOf(1.0f)
-    private var showBackground by mutableStateOf(true)
-    private var backgroundOpacity by mutableStateOf(0.7f)
-    private var showShadow by mutableStateOf(true)
-    private var shadowOffset by mutableStateOf(2)
-    private var animateText by mutableStateOf(true)
-    private var glowEffect by mutableStateOf(false)
-    private var borderStyle by mutableStateOf(WaterMarkModule.BorderStyle.NONE)
-
+    private var fontSize by mutableStateOf(20)
+    private var mode by mutableStateOf(WaterMarkModule.WatermarkMode.RGB)
+    private var fontStyle by mutableStateOf(WaterMarkModule.FontStyle.MINECRAFT)
 
     companion object {
         val overlayInstance by lazy { WaterMarkOverlay() }
@@ -99,39 +87,14 @@ class WaterMarkOverlay : OverlayWindow() {
             overlayInstance.fontSize = size
         }
 
-        fun setRainbowSpeed(speed: Float) {
-            overlayInstance.rainbowSpeed = speed
+        fun setMode(newMode: WaterMarkModule.WatermarkMode) {
+            overlayInstance.mode = newMode
         }
 
-        fun setShowBackground(show: Boolean) {
-            overlayInstance.showBackground = show
-        }
-
-        fun setBackgroundOpacity(opacity: Float) {
-            overlayInstance.backgroundOpacity = opacity
-        }
-
-        fun setShowShadow(show: Boolean) {
-            overlayInstance.showShadow = show
-        }
-
-        fun setShadowOffset(offset: Int) {
-            overlayInstance.shadowOffset = offset
-        }
-
-        fun setAnimateText(animate: Boolean) {
-            overlayInstance.animateText = animate
-        }
-
-        fun setGlowEffect(glow: Boolean) {
-            overlayInstance.glowEffect = glow
-        }
-
-        fun setBorderStyle(style: WaterMarkModule.BorderStyle) {
-            overlayInstance.borderStyle = style
+        fun setFontStyle(style: WaterMarkModule.FontStyle) {
+            overlayInstance.fontStyle = style
         }
     }
-
 
     private fun updateLayoutParams() {
         _layoutParams.gravity = when (position) {
@@ -151,39 +114,21 @@ class WaterMarkOverlay : OverlayWindow() {
         } catch (_: Exception) {}
     }
 
-
-
     @Composable
     override fun Content() {
         if (!shouldShowOverlay) return
 
-        var rainbowOffset by remember { mutableStateOf(0f) }
-        var pulse by remember { mutableStateOf(0f) }
+        var time by remember { mutableStateOf(0f) }
 
         LaunchedEffect(Unit) {
             while (true) {
-                rainbowOffset = (rainbowOffset + rainbowSpeed * 0.01f) % 1f
-                pulse = (pulse + 0.05f) % 1f
+                time += 0.016f
                 delay(16)
             }
         }
 
-        val scale by animateFloatAsState(
-            targetValue = if (animateText) 1f + sin(pulse * 6.28f) * 0.05f else 1f,
-            animationSpec = tween(120),
-            label = "scale"
-        )
-
-        val rainbowColors = List(7) { i ->
-            val hue = ((i * 360f / 7) + rainbowOffset * 360f) % 360f
-            Color.hsv(hue, 1f, 1f)
-        }
-
-        val gradientBrush = Brush.horizontalGradient(rainbowColors)
-
         Box(
             modifier = Modifier
-                .scale(scale)
                 .pointerInput(Unit) {
                     detectDragGestures { _, drag ->
                         _layoutParams.x += drag.x.toInt()
@@ -193,64 +138,178 @@ class WaterMarkOverlay : OverlayWindow() {
                         } catch (_: Exception) {}
                     }
                 }
-                .then(
-                    if (showBackground)
-                        Modifier
-                            .background(
-                                WColors.Surface.copy(alpha = backgroundOpacity),
-                                RoundedCornerShape(10.dp)
-                            )
-                            .clip(RoundedCornerShape(10.dp))
-                    else Modifier
-                )
-                .then(
-                    if (borderStyle == WaterMarkModule.BorderStyle.SOLID)
-                        Modifier.border(2.dp, gradientBrush, RoundedCornerShape(10.dp))
-                    else Modifier
-                )
-                .then(
-                    if (glowEffect)
-                        Modifier.drawBehind {
-                            drawIntoCanvas {
-                                val paint = Paint().asFrameworkPaint().apply {
-                                    color = Color.White.toArgb()
-                                    setShadowLayer(20f, 0f, 0f, Color.White.toArgb())
-                                }
-                                it.nativeCanvas.drawRoundRect(
-                                    0f, 0f, size.width, size.height,
-                                    12f, 12f, paint
-                                )
-                            }
-                        }
-                    else Modifier
-                )
-                .padding(horizontal = 14.dp, vertical = 6.dp)
         ) {
-
-            if (showShadow) {
-                Text(
-                    text = buildAnnotatedWatermark(
-                        Brush.horizontalGradient(listOf(Color.Black, Color.Black))
-                    ),
-                    modifier = Modifier.offset(shadowOffset.dp, shadowOffset.dp),
-                    style = TextStyle(color = Color.Black.copy(alpha = 0.4f))
-                )
+            when (mode) {
+                WaterMarkModule.WatermarkMode.RGB -> RGBWatermark(time)
             }
+        }
+    }
 
+    @Composable
+    private fun RGBWatermark(time: Float) {
+        val colors = listOf(
+            Color(0xFFFF0000), Color(0xFFFF7F00), Color(0xFFFFFF00),
+            Color(0xFF00FF00), Color(0xFF0000FF), Color(0xFF4B0082),
+            Color(0xFF9400D3), Color(0xFFFF0000)
+        )
+
+        val smoothGradient = remember(time) {
+            val gradientColors = mutableListOf<Color>()
+            for (i in 0 until 100) {
+                val position = (i / 100f + time * 0.15f) % 1f
+                val scaledPos = position * (colors.size - 1)
+                val index = scaledPos.toInt()
+                val fraction = scaledPos - index
+                val color1 = colors[index]
+                val color2 = colors[index + 1]
+                gradientColors.add(blendColors(color1, color2, fraction))
+            }
+            gradientColors
+        }
+
+        val gradientBrush = Brush.linearGradient(
+            colors = smoothGradient,
+            start = Offset.Zero,
+            end = Offset.Infinite
+        )
+
+        val fontFamily = getFontFamily()
+
+        Text(
+            text = buildWatermarkText(gradientBrush),
+            style = TextStyle(
+                fontFamily = fontFamily,
+                fontWeight = FontWeight.Bold,
+                shadow = Shadow(
+                    color = Color.Black.copy(alpha = 0.4f),
+                    offset = Offset(1f, 1f),
+                    blurRadius = 3f
+                )
+            )
+        )
+    }
+
+    @Composable
+    private fun GlowWatermark(time: Float) {
+
+        val baseRed = Color(0xFFFF0033)
+        val darkRed = Color(0xFFCC0028)
+        val brightRed = Color(0xFFFF3355)
+
+
+        val glowIntensity = (sin(time * 1.2f) * 0.5f + 0.5f) * 0.4f + 0.6f
+
+
+        val redGradient = Brush.horizontalGradient(
+            colors = listOf(
+                darkRed,
+                baseRed,
+                brightRed,
+                baseRed,
+                darkRed
+            )
+        )
+
+        val fontFamily = getFontFamily()
+
+
+        Box(
+            modifier = Modifier.drawBehind {
+                drawIntoCanvas { canvas ->
+
+                    val outerGlow = Paint().asFrameworkPaint().apply {
+                        color = android.graphics.Color.TRANSPARENT
+                        setShadowLayer(
+                            35f * glowIntensity,
+                            0f,
+                            0f,
+                            baseRed.copy(alpha = 0.6f * glowIntensity).toArgb()
+                        )
+                    }
+                    canvas.nativeCanvas.drawRect(
+                        -15f, -10f, size.width + 15f, size.height + 10f, outerGlow
+                    )
+
+
+                    val middleGlow = Paint().asFrameworkPaint().apply {
+                        color = android.graphics.Color.TRANSPARENT
+                        setShadowLayer(
+                            20f * glowIntensity,
+                            0f,
+                            0f,
+                            brightRed.copy(alpha = 0.7f * glowIntensity).toArgb()
+                        )
+                    }
+                    canvas.nativeCanvas.drawRect(
+                        -10f, -5f, size.width + 10f, size.height + 5f, middleGlow
+                    )
+
+
+                    val innerGlow = Paint().asFrameworkPaint().apply {
+                        color = android.graphics.Color.TRANSPARENT
+                        setShadowLayer(
+                            10f * glowIntensity,
+                            0f,
+                            0f,
+                            Color(0xFFFF6677).copy(alpha = 0.9f * glowIntensity).toArgb()
+                        )
+                    }
+                    canvas.nativeCanvas.drawRect(
+                        -5f, -2f, size.width + 5f, size.height + 2f, innerGlow
+                    )
+                }
+            }
+        ) {
             Text(
-                text = buildAnnotatedWatermark(gradientBrush),
-                style = TextStyle(fontWeight = FontWeight.Medium)
+                text = buildAnnotatedString {
+                    withStyle(
+                        SpanStyle(
+                            fontSize = fontSize.sp,
+                            fontWeight = FontWeight.Bold,
+                            brush = redGradient,
+                            shadow = Shadow(
+                                color = baseRed.copy(alpha = 0.8f * glowIntensity),
+                                offset = Offset(0f, 0f),
+                                blurRadius = 15f * glowIntensity
+                            )
+                        )
+                    ) {
+                        append(customText)
+                    }
+
+                    if (showVersion) {
+                        withStyle(
+                            SpanStyle(
+                                fontSize = (fontSize * 0.55f).sp,
+                                fontWeight = FontWeight.SemiBold,
+                                baselineShift = BaselineShift.Superscript,
+                                brush = redGradient,
+                                shadow = Shadow(
+                                    color = baseRed.copy(alpha = 0.7f * glowIntensity),
+                                    offset = Offset(0f, 0f),
+                                    blurRadius = 12f * glowIntensity
+                                )
+                            )
+                        ) {
+                            append(" v${BuildConfig.VERSION_NAME}")
+                        }
+                    }
+                },
+                style = TextStyle(
+                    fontFamily = fontFamily,
+                    fontWeight = FontWeight.Bold
+                )
             )
         }
     }
 
     @Composable
-    private fun buildAnnotatedWatermark(brush: Brush): AnnotatedString {
+    private fun buildWatermarkText(brush: Brush): AnnotatedString {
         return buildAnnotatedString {
             withStyle(
                 SpanStyle(
                     fontSize = fontSize.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                     brush = brush
                 )
             ) {
@@ -261,7 +320,7 @@ class WaterMarkOverlay : OverlayWindow() {
                 withStyle(
                     SpanStyle(
                         fontSize = (fontSize * 0.55f).sp,
-                        fontWeight = FontWeight.Medium,
+                        fontWeight = FontWeight.SemiBold,
                         baselineShift = BaselineShift.Superscript,
                         brush = brush
                     )
@@ -270,5 +329,27 @@ class WaterMarkOverlay : OverlayWindow() {
                 }
             }
         }
+    }
+
+    @Composable
+    private fun getFontFamily(): FontFamily {
+        return when (fontStyle) {
+            WaterMarkModule.FontStyle.MINECRAFT -> try {
+                FontFamily(Font(R.font.minecraft))
+            } catch (e: Exception) {
+                FontFamily.Monospace
+            }
+            WaterMarkModule.FontStyle.DEFAULT -> FontFamily.Default
+        }
+    }
+
+    private fun blendColors(color1: Color, color2: Color, ratio: Float): Color {
+        val clampedRatio = ratio.coerceIn(0f, 1f)
+        return Color(
+            red = color1.red * (1 - clampedRatio) + color2.red * clampedRatio,
+            green = color1.green * (1 - clampedRatio) + color2.green * clampedRatio,
+            blue = color1.blue * (1 - clampedRatio) + color2.blue * clampedRatio,
+            alpha = color1.alpha * (1 - clampedRatio) + color2.alpha * clampedRatio
+        )
     }
 }
