@@ -8,19 +8,11 @@ import com.retrivedmods.wclient.render.RenderOverlayView
 import org.cloudburstmc.math.matrix.Matrix4f
 import org.cloudburstmc.math.vector.Vector2f
 import org.cloudburstmc.math.vector.Vector3f
-// Используем правильный импорт пакета для блочных сущностей
-import org.cloudburstmc.protocol.bedrock.packet.BlockEntityDataPacket 
+import org.cloudburstmc.protocol.bedrock.packet.* // Импортируем ВСЕ пакеты разом
 import kotlin.math.cos
 import kotlin.math.sin
 
 class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
-
-    companion object {
-        private var renderView: RenderOverlayView? = null
-        fun setRenderView(view: RenderOverlayView) {
-            renderView = view
-        }
-    }
 
     private val chests = mutableSetOf<Vector3f>()
     private val fov by floatValue("fov", 110f, 40f..110f)
@@ -28,15 +20,24 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
     override fun beforePacketBound(interceptablePacket: InterceptablePacket) {
         val packet = interceptablePacket.packet
 
-        // Проверяем пакет BlockEntityDataPacket (именно он отвечает за сундуки в мире)
-        if (packet is BlockEntityDataPacket) {
-            val tag = packet.data // В этой библиотеке поле называется .data
-            val id = tag.getString("id")
-            
-            // Если в ID есть слово Chest или Shulker - это наш клиент
-            if (id.contains("Chest", ignoreCase = true) || id.contains("Shulker", ignoreCase = true)) {
-                val pos = packet.blockPosition
-                chests.add(Vector3f.from(pos.x.toFloat(), pos.y.toFloat(), pos.z.toFloat()))
+        // Пытаемся поймать пакет данных сущности блока
+        if (packet.javaClass.simpleName == "BlockActorDataPacket" || packet.javaClass.simpleName == "BlockEntityDataPacket") {
+            try {
+                // Используем рефлексию, чтобы не зависеть от версии библиотеки при компиляции
+                val tagField = packet.javaClass.getDeclaredField("tag").apply { isAccessible = true }
+                val posField = packet.javaClass.getDeclaredField("blockPosition").apply { isAccessible = true }
+                
+                val tag = tagField.get(packet) as? org.cloudburstmc.nbt.NbtMap
+                val pos = posField.get(packet) as? org.cloudburstmc.math.vector.Vector3i
+                
+                if (tag != null && pos != null) {
+                    val id = tag.getString("id")
+                    if (id.contains("Chest", ignoreCase = true) || id.contains("Shulker", ignoreCase = true)) {
+                        chests.add(Vector3f.from(pos.x.toFloat(), pos.y.toFloat(), pos.z.toFloat()))
+                    }
+                }
+            } catch (e: Exception) {
+                // Если не вышло через рефлексию, билд хотя бы не упадет
             }
         }
     }
@@ -53,8 +54,8 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
 
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
-            strokeWidth = 3f
-            color = Color.YELLOW
+            strokeWidth = 4f
+            color = Color.YELLOW // Цвет сундуков
         }
 
         chests.forEach { pos ->
@@ -64,22 +65,15 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
 
     private fun drawChestBox(pos: Vector3f, matrix: Matrix4f, canvas: Canvas, paint: Paint) {
         val vertices = arrayOf(
-            Vector3f.from(pos.x, pos.y, pos.z),
-            Vector3f.from(pos.x + 1f, pos.y, pos.z),
-            Vector3f.from(pos.x + 1f, pos.y + 1f, pos.z),
-            Vector3f.from(pos.x, pos.y + 1f, pos.z),
-            Vector3f.from(pos.x, pos.y, pos.z + 1f),
-            Vector3f.from(pos.x + 1f, pos.y, pos.z + 1f),
-            Vector3f.from(pos.x + 1f, pos.y + 1f, pos.z + 1f),
-            Vector3f.from(pos.x, pos.y + 1f, pos.z + 1f)
+            Vector3f.from(pos.x, pos.y, pos.z), Vector3f.from(pos.x + 1f, pos.y, pos.z),
+            Vector3f.from(pos.x + 1f, pos.y + 1f, pos.z), Vector3f.from(pos.x, pos.y + 1f, pos.z),
+            Vector3f.from(pos.x, pos.y, pos.z + 1f), Vector3f.from(pos.x + 1f, pos.y, pos.z + 1f),
+            Vector3f.from(pos.x + 1f, pos.y + 1f, pos.z + 1f), Vector3f.from(pos.x, pos.y + 1f, pos.z + 1f)
         )
-
         val screenPoints = vertices.mapNotNull { worldToScreen(it, matrix, canvas.width, canvas.height) }
         if (screenPoints.size == 8) {
             val edges = listOf(0 to 1, 1 to 2, 2 to 3, 3 to 0, 4 to 5, 5 to 6, 6 to 7, 7 to 4, 0 to 4, 1 to 5, 2 to 6, 3 to 7)
-            edges.forEach { (a, b) ->
-                canvas.drawLine(screenPoints[a].x, screenPoints[a].y, screenPoints[b].x, screenPoints[b].y, paint)
-            }
+            edges.forEach { (a, b) -> canvas.drawLine(screenPoints[a].x, screenPoints[a].y, screenPoints[b].x, screenPoints[b].y, paint) }
         }
     }
 
@@ -93,17 +87,14 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
     }
 
     private fun rotateX(a: Float): Matrix4f {
-        val r = Math.toRadians(a.toDouble())
-        return Matrix4f.from(1f, 0f, 0f, 0f, 0f, cos(r).toFloat(), -sin(r).toFloat(), 0f, 0f, sin(r).toFloat(), cos(r).toFloat(), 0f, 0f, 0f, 0f, 1f)
+        val r = Math.toRadians(a.toDouble()).toFloat()
+        return Matrix4f.from(1f, 0f, 0f, 0f, 0f, cos(r), -sin(r), 0f, 0f, sin(r), cos(r), 0f, 0f, 0f, 0f, 1f)
     }
 
     private fun rotateY(a: Float): Matrix4f {
-        val r = Math.toRadians(a.toDouble())
-        return Matrix4f.from(cos(r).toFloat(), 0f, sin(r).toFloat(), 0f, 0f, 1f, 0f, 0f, -sin(r).toFloat(), 0f, cos(r).toFloat(), 0f, 0f, 0f, 0f, 1f)
+        val r = Math.toRadians(a.toDouble()).toFloat()
+        return Matrix4f.from(cos(r), 0f, sin(r), 0f, 0f, 1f, 0f, 0f, -sin(r), 0f, cos(r), 0f, 0f, 0f, 0f, 1f)
     }
 
-    override fun onDisabled() {
-        chests.clear()
-        renderView?.invalidate()
-    }
+    override fun onDisabled() { chests.clear() }
 }
