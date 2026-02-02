@@ -8,7 +8,8 @@ import com.retrivedmods.wclient.render.RenderOverlayView
 import org.cloudburstmc.math.matrix.Matrix4f
 import org.cloudburstmc.math.vector.Vector2f
 import org.cloudburstmc.math.vector.Vector3f
-import org.cloudburstmc.protocol.bedrock.packet.BlockActorDataPacket
+// ИСПРАВЛЕННЫЙ ИМПОРТ
+import org.cloudburstmc.protocol.bedrock.packet.BlockActorDataPacket 
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -21,26 +22,21 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
         }
     }
 
-    // Список найденных сундуков
     private val chests = mutableSetOf<Vector3f>()
-    
-    // Настройки цвета (как в твоем ESP)
-    private val colorRed by intValue("color_red", 255, 0..255)
-    private val colorGreen by intValue("color_green", 200, 0..255)
-    private val colorBlue by intValue("color_blue", 0, 0..255)
     private val fov by floatValue("fov", 110f, 40f..110f)
 
     override fun beforePacketBound(interceptablePacket: InterceptablePacket) {
         val packet = interceptablePacket.packet
 
-        // Ловим данные о блочных сущностях (сундуки, печки и т.д.)
+        // ИСПРАВЛЕННАЯ ЛОГИКА ПАКЕТА
         if (packet is BlockActorDataPacket) {
-            val tag = packet.data
+            val tag = packet.tag // В Cloudburst используется .tag вместо .data
             val id = tag.getString("id")
             
-            // Если это сундук, добавляем его координаты в список
             if (id == "Chest" || id == "EnderChest" || id == "ShulkerBox") {
-                chests.add(Vector3f.from(packet.blockPosition.x.toFloat(), packet.blockPosition.y.toFloat(), packet.blockPosition.z.toFloat()))
+                // В Cloudburst свойство называется .blockPosition (с маленькой буквы)
+                val pos = packet.blockPosition 
+                chests.add(Vector3f.from(pos.x.toFloat(), pos.y.toFloat(), pos.z.toFloat()))
             }
         }
     }
@@ -49,8 +45,6 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
         if (!isEnabled || !isSessionCreated || chests.isEmpty()) return
 
         val localPlayer = session.localPlayer
-        
-        // Матрица проекции (копируем из твоего ESPModule)
         val viewProj = Matrix4f.createPerspective(fov, canvas.width.toFloat() / canvas.height, 0.1f, 128f)
             .mul(Matrix4f.createTranslation(localPlayer.vec3Position)
                 .mul(rotateY(-localPlayer.rotationYaw - 180f))
@@ -60,7 +54,7 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeWidth = 3f
-            color = Color.rgb(colorRed, colorGreen, colorBlue)
+            color = Color.YELLOW
         }
 
         chests.forEach { pos ->
@@ -69,7 +63,6 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
     }
 
     private fun drawChestBox(pos: Vector3f, matrix: Matrix4f, canvas: Canvas, paint: Paint) {
-        // Вершины блока сундука (1x1x1 блок)
         val vertices = arrayOf(
             Vector3f.from(pos.x, pos.y, pos.z),
             Vector3f.from(pos.x + 1f, pos.y, pos.z),
@@ -83,17 +76,13 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
 
         val screenPoints = vertices.mapNotNull { worldToScreen(it, matrix, canvas.width, canvas.height) }
         if (screenPoints.size == 8) {
-            // Рисуем 3D бокс (используем ту же логику соединений линий)
-            val edges = listOf(
-                0 to 1, 1 to 2, 2 to 3, 3 to 0, 4 to 5, 5 to 6, 6 to 7, 7 to 4, 0 to 4, 1 to 5, 2 to 6, 3 to 7
-            )
+            val edges = listOf(0 to 1, 1 to 2, 2 to 3, 3 to 0, 4 to 5, 5 to 6, 6 to 7, 7 to 4, 0 to 4, 1 to 5, 2 to 6, 3 to 7)
             edges.forEach { (a, b) ->
                 canvas.drawLine(screenPoints[a].x, screenPoints[a].y, screenPoints[b].x, screenPoints[b].y, paint)
             }
         }
     }
 
-    // Вспомогательные функции трансформации (копии из ESPModule)
     private fun worldToScreen(pos: Vector3f, m: Matrix4f, w: Int, h: Int): Vector2f? {
         val rw = m.get(3, 0) * pos.x + m.get(3, 1) * pos.y + m.get(3, 2) * pos.z + m.get(3, 3)
         if (rw <= 0.01f) return null
