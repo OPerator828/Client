@@ -28,24 +28,18 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
         val packet = interceptablePacket.packet
 
         try {
-            // Пробуем несколько типов пакетов
             when (packet) {
-                // Основной пакет с данными блок-сущностей
                 is BlockEntityDataPacket -> {
                     if (DEBUG) Log.d(TAG, "BlockEntityDataPacket received")
                     handleBlockEntityData(packet)
                 }
                 
-                // Пакет обновления чанка (может содержать сундуки)
                 is LevelChunkPacket -> {
                     if (DEBUG) Log.d(TAG, "LevelChunkPacket received")
-                    // Здесь могут быть данные о сундуках
                 }
                 
-                // Пакет с обновлением блока
                 is UpdateBlockPacket -> {
                     if (DEBUG) Log.d(TAG, "UpdateBlockPacket received: ${packet.definition}")
-                    // Проверяем, не сундук ли это
                     val blockName = packet.definition?.toString() ?: ""
                     if (blockName.contains("chest", ignoreCase = true)) {
                         val pos = packet.blockPosition
@@ -72,14 +66,14 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
             if (DEBUG) {
                 Log.d(TAG, "Position: $pos")
                 Log.d(TAG, "Tag: $tag")
-                tag?.let { Log.d(TAG, "Tag keys: ${it.keySet()}") }
+                // ИСПРАВЛЕНО: убрали скобки ()
+                tag?.let { Log.d(TAG, "Tag keys: ${it.keySet}") }
             }
             
             if (tag != null && pos != null) {
                 val id = tag.getString("id", "")
                 if (DEBUG) Log.d(TAG, "Block entity ID: $id")
                 
-                // Проверяем различные варианты ID
                 if (id.contains("chest", ignoreCase = true) || 
                     id.contains("shulker", ignoreCase = true) ||
                     id == "Chest" || 
@@ -121,7 +115,6 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
                 Log.d(TAG, "Rendering ${chests.size} chests, player at $playerPos")
             }
             
-            // Удаляем далекие сундуки
             chests.removeIf { chest ->
                 val dx = chest.x - playerPos.x
                 val dy = chest.y - playerPos.y
@@ -131,7 +124,6 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
 
             if (chests.isEmpty()) return
 
-            // Создаем view-projection матрицу
             val viewMatrix = createViewMatrix(
                 playerPos,
                 localPlayer.rotationYaw,
@@ -149,7 +141,7 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
 
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 style = Paint.Style.STROKE
-                strokeWidth = 5f // Увеличил толщину для видимости
+                strokeWidth = 5f
                 color = Color.YELLOW
             }
 
@@ -200,7 +192,6 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
         
         if (distSq > maxDistance * maxDistance) return false
 
-        // Вершины куба
         val vertices = arrayOf(
             Vector3f.from(pos.x - 0.5f, pos.y, pos.z - 0.5f),
             Vector3f.from(pos.x + 0.5f, pos.y, pos.z - 0.5f),
@@ -219,14 +210,12 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
             return false
         }
 
-        // 12 ребер куба
         val edges = listOf(
             0 to 1, 1 to 2, 2 to 3, 3 to 0,
             4 to 5, 5 to 6, 6 to 7, 7 to 4,
             0 to 4, 1 to 5, 2 to 6, 3 to 7
         )
 
-        // Меняем прозрачность по расстоянию
         val distance = sqrt(distSq)
         val alpha = (255 * (1f - distance / maxDistance)).toInt().coerceIn(100, 255)
         paint.alpha = alpha
