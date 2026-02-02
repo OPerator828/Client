@@ -65,6 +65,7 @@ import com.retrivedmods.wclient.game.module.visual.SpeedDisplayModule
 import com.retrivedmods.wclient.game.module.visual.WorldStateModule
 import com.retrivedmods.wclient.game.module.visual.ZoomModule
 import com.retrivedmods.wclient.game.module.visual.TargetHudModule
+import com.retrivedmods.wclient.game.module.visual.ChestESPModule
 import com.retrivedmods.wclient.game.module.world.FreeCameraModule
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -133,6 +134,7 @@ object ModuleManager {
             add(CrosshairModule())
             add(TargetHudModule())
             add(FullbrightModule())
+            add(ChestESPModule()) // Твоя новая функция!
 
             // World
             add(FreeCameraModule())
