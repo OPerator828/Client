@@ -8,8 +8,9 @@ import com.retrivedmods.wclient.render.RenderOverlayView
 import org.cloudburstmc.math.matrix.Matrix4f
 import org.cloudburstmc.math.vector.Vector2f
 import org.cloudburstmc.math.vector.Vector3f
-// Используем wildcard импорт, чтобы компилятор сам нашел нужный класс в пакете
-import org.cloudburstmc.protocol.bedrock.packet.* import kotlin.math.cos
+// Используем правильный импорт пакета для блочных сущностей
+import org.cloudburstmc.protocol.bedrock.packet.BlockEntityDataPacket 
+import kotlin.math.cos
 import kotlin.math.sin
 
 class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
@@ -27,12 +28,12 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
     override fun beforePacketBound(interceptablePacket: InterceptablePacket) {
         val packet = interceptablePacket.packet
 
-        // Проверяем пакет данных блочной сущности
-        if (packet is BlockActorDataPacket) {
-            val tag = packet.tag 
+        // Проверяем пакет BlockEntityDataPacket (именно он отвечает за сундуки в мире)
+        if (packet is BlockEntityDataPacket) {
+            val tag = packet.data // В этой библиотеке поле называется .data
             val id = tag.getString("id")
             
-            // Проверка на сундуки и шалкеры
+            // Если в ID есть слово Chest или Shulker - это наш клиент
             if (id.contains("Chest", ignoreCase = true) || id.contains("Shulker", ignoreCase = true)) {
                 val pos = packet.blockPosition
                 chests.add(Vector3f.from(pos.x.toFloat(), pos.y.toFloat(), pos.z.toFloat()))
