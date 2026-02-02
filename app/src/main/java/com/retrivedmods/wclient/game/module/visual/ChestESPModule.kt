@@ -8,9 +8,8 @@ import com.retrivedmods.wclient.render.RenderOverlayView
 import org.cloudburstmc.math.matrix.Matrix4f
 import org.cloudburstmc.math.vector.Vector2f
 import org.cloudburstmc.math.vector.Vector3f
-// ИСПРАВЛЕННЫЙ ИМПОРТ
-import org.cloudburstmc.protocol.bedrock.packet.BlockActorDataPacket 
-import kotlin.math.cos
+// Используем wildcard импорт, чтобы компилятор сам нашел нужный класс в пакете
+import org.cloudburstmc.protocol.bedrock.packet.* import kotlin.math.cos
 import kotlin.math.sin
 
 class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
@@ -28,14 +27,14 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
     override fun beforePacketBound(interceptablePacket: InterceptablePacket) {
         val packet = interceptablePacket.packet
 
-        // ИСПРАВЛЕННАЯ ЛОГИКА ПАКЕТА
+        // Проверяем пакет данных блочной сущности
         if (packet is BlockActorDataPacket) {
-            val tag = packet.tag // В Cloudburst используется .tag вместо .data
+            val tag = packet.tag 
             val id = tag.getString("id")
             
-            if (id == "Chest" || id == "EnderChest" || id == "ShulkerBox") {
-                // В Cloudburst свойство называется .blockPosition (с маленькой буквы)
-                val pos = packet.blockPosition 
+            // Проверка на сундуки и шалкеры
+            if (id.contains("Chest", ignoreCase = true) || id.contains("Shulker", ignoreCase = true)) {
+                val pos = packet.blockPosition
                 chests.add(Vector3f.from(pos.x.toFloat(), pos.y.toFloat(), pos.z.toFloat()))
             }
         }
