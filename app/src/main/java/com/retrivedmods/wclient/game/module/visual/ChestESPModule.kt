@@ -1,13 +1,14 @@
 package com.retrivedmods.wclient.game.module.visual
 
 import android.graphics.*
+import android.util.Log
 import com.retrivedmods.wclient.game.InterceptablePacket
 import com.retrivedmods.wclient.game.Module
 import com.retrivedmods.wclient.game.ModuleCategory
 import org.cloudburstmc.math.matrix.Matrix4f
 import org.cloudburstmc.math.vector.Vector2f
 import org.cloudburstmc.math.vector.Vector3f
-import org.cloudburstmc.protocol.bedrock.packet.BlockEntityDataPacket
+import org.cloudburstmc.protocol.bedrock.packet.*
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -17,43 +18,108 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
     private val chests = mutableSetOf<Vector3f>()
     private val fov by floatValue("fov", 90f, 40f..110f)
     private val maxDistance = 64f
+    
+    companion object {
+        private const val TAG = "ChestESP"
+        private const val DEBUG = true
+    }
 
     override fun beforePacketBound(interceptablePacket: InterceptablePacket) {
         val packet = interceptablePacket.packet
 
-        // Ловим пакет с данными о блоке-сущности
-        if (packet is BlockEntityDataPacket) {
-            try {
-                val tag = packet.data
-                val pos = packet.blockPosition
+        try {
+            // Пробуем несколько типов пакетов
+            when (packet) {
+                // Основной пакет с данными блок-сущностей
+                is BlockEntityDataPacket -> {
+                    if (DEBUG) Log.d(TAG, "BlockEntityDataPacket received")
+                    handleBlockEntityData(packet)
+                }
                 
-                if (tag != null && pos != null) {
-                    val id = tag.getString("id", "")
-                    // Проверяем, что это сундук
-                    if (id.contains("chest", ignoreCase = true) || 
-                        id.contains("shulker", ignoreCase = true) ||
-                        id == "Chest" || id == "EnderChest" || id == "TrappedChest") {
-                        
+                // Пакет обновления чанка (может содержать сундуки)
+                is LevelChunkPacket -> {
+                    if (DEBUG) Log.d(TAG, "LevelChunkPacket received")
+                    // Здесь могут быть данные о сундуках
+                }
+                
+                // Пакет с обновлением блока
+                is UpdateBlockPacket -> {
+                    if (DEBUG) Log.d(TAG, "UpdateBlockPacket received: ${packet.definition}")
+                    // Проверяем, не сундук ли это
+                    val blockName = packet.definition?.toString() ?: ""
+                    if (blockName.contains("chest", ignoreCase = true)) {
+                        val pos = packet.blockPosition
                         val chestPos = Vector3f.from(
                             pos.x.toFloat() + 0.5f,
                             pos.y.toFloat(),
                             pos.z.toFloat() + 0.5f
                         )
                         chests.add(chestPos)
+                        if (DEBUG) Log.d(TAG, "Chest found via UpdateBlockPacket at $chestPos")
                     }
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error processing packet: ${packet.javaClass.simpleName}", e)
+        }
+    }
+
+    private fun handleBlockEntityData(packet: BlockEntityDataPacket) {
+        try {
+            val tag = packet.data
+            val pos = packet.blockPosition
+            
+            if (DEBUG) {
+                Log.d(TAG, "Position: $pos")
+                Log.d(TAG, "Tag: $tag")
+                tag?.let { Log.d(TAG, "Tag keys: ${it.keySet()}") }
+            }
+            
+            if (tag != null && pos != null) {
+                val id = tag.getString("id", "")
+                if (DEBUG) Log.d(TAG, "Block entity ID: $id")
+                
+                // Проверяем различные варианты ID
+                if (id.contains("chest", ignoreCase = true) || 
+                    id.contains("shulker", ignoreCase = true) ||
+                    id == "Chest" || 
+                    id == "EnderChest" || 
+                    id == "TrappedChest" ||
+                    id == "minecraft:chest" ||
+                    id == "minecraft:ender_chest" ||
+                    id == "minecraft:trapped_chest") {
+                    
+                    val chestPos = Vector3f.from(
+                        pos.x.toFloat() + 0.5f,
+                        pos.y.toFloat(),
+                        pos.z.toFloat() + 0.5f
+                    )
+                    chests.add(chestPos)
+                    if (DEBUG) Log.d(TAG, "Chest added at $chestPos, total: ${chests.size}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in handleBlockEntityData", e)
         }
     }
 
     fun render(canvas: Canvas) {
-        if (!isEnabled || !isSessionCreated || chests.isEmpty()) return
+        if (!isEnabled) {
+            if (DEBUG) Log.d(TAG, "Module disabled")
+            return
+        }
+        if (!isSessionCreated) {
+            if (DEBUG) Log.d(TAG, "Session not created")
+            return
+        }
 
         try {
             val localPlayer = session.localPlayer
             val playerPos = localPlayer.vec3Position
+            
+            if (DEBUG && chests.isNotEmpty()) {
+                Log.d(TAG, "Rendering ${chests.size} chests, player at $playerPos")
+            }
             
             // Удаляем далекие сундуки
             chests.removeIf { chest ->
@@ -83,16 +149,23 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
 
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 style = Paint.Style.STROKE
-                strokeWidth = 3f
+                strokeWidth = 5f // Увеличил толщину для видимости
                 color = Color.YELLOW
             }
 
+            var renderedCount = 0
             chests.forEach { pos ->
-                drawChestBox(pos, viewProjMatrix, canvas, paint, playerPos)
+                if (drawChestBox(pos, viewProjMatrix, canvas, paint, playerPos)) {
+                    renderedCount++
+                }
+            }
+            
+            if (DEBUG) {
+                Log.d(TAG, "Rendered $renderedCount/${chests.size} chests")
             }
             
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "Error in render", e)
         }
     }
 
@@ -119,13 +192,13 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
         canvas: Canvas,
         paint: Paint,
         playerPos: Vector3f
-    ) {
+    ): Boolean {
         val dx = pos.x - playerPos.x
         val dy = pos.y - playerPos.y
         val dz = pos.z - playerPos.z
         val distSq = dx * dx + dy * dy + dz * dz
         
-        if (distSq > maxDistance * maxDistance) return
+        if (distSq > maxDistance * maxDistance) return false
 
         // Вершины куба
         val vertices = arrayOf(
@@ -141,7 +214,10 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
 
         val screenPoints = vertices.mapNotNull { worldToScreen(it, matrix, canvas.width, canvas.height) }
         
-        if (screenPoints.size != 8) return
+        if (screenPoints.size != 8) {
+            if (DEBUG) Log.d(TAG, "Only ${screenPoints.size}/8 points visible for chest at $pos")
+            return false
+        }
 
         // 12 ребер куба
         val edges = listOf(
@@ -152,7 +228,7 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
 
         // Меняем прозрачность по расстоянию
         val distance = sqrt(distSq)
-        val alpha = (255 * (1f - distance / maxDistance)).toInt().coerceIn(50, 255)
+        val alpha = (255 * (1f - distance / maxDistance)).toInt().coerceIn(100, 255)
         paint.alpha = alpha
 
         edges.forEach { (a, b) ->
@@ -164,6 +240,8 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
                 paint
             )
         }
+        
+        return true
     }
 
     private fun worldToScreen(pos: Vector3f, viewProj: Matrix4f, width: Int, height: Int): Vector2f? {
@@ -213,6 +291,7 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
     }
 
     override fun onDisabled() {
+        if (DEBUG) Log.d(TAG, "Module disabled, clearing ${chests.size} chests")
         chests.clear()
     }
 }
