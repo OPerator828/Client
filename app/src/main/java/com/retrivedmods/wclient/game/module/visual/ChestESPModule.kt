@@ -10,42 +10,40 @@ import org.cloudburstmc.math.vector.Vector3f
 import org.cloudburstmc.protocol.bedrock.packet.BlockEntityDataPacket
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
 
     private val chests = mutableSetOf<Vector3f>()
     private val fov by floatValue("fov", 90f, 40f..110f)
-    private val maxDistance = 64f // Максимальная дистанция отрисовки
+    private val maxDistance = 64f
 
     override fun beforePacketBound(interceptablePacket: InterceptablePacket) {
         val packet = interceptablePacket.packet
 
-        // Более надежная проверка типа пакета
-        when (packet) {
-            is BlockEntityDataPacket -> {
-                try {
-                    val tag = packet.data
-                    val pos = packet.blockPosition
-                    
-                    if (tag != null && pos != null) {
-                        val id = tag.getString("id", "")
-                        // Проверяем различные варианты ID сундуков
-                        if (id.contains("chest", ignoreCase = true) || 
-                            id.contains("shulker", ignoreCase = true) ||
-                            id == "Chest" || id == "EnderChest" || id == "TrappedChest") {
-                            
-                            val chestPos = Vector3f.from(
-                                pos.x.toFloat() + 0.5f, // Центрируем
-                                pos.y.toFloat(),
-                                pos.z.toFloat() + 0.5f
-                            )
-                            chests.add(chestPos)
-                        }
+        // Ловим пакет с данными о блоке-сущности
+        if (packet is BlockEntityDataPacket) {
+            try {
+                val tag = packet.data
+                val pos = packet.blockPosition
+                
+                if (tag != null && pos != null) {
+                    val id = tag.getString("id", "")
+                    // Проверяем, что это сундук
+                    if (id.contains("chest", ignoreCase = true) || 
+                        id.contains("shulker", ignoreCase = true) ||
+                        id == "Chest" || id == "EnderChest" || id == "TrappedChest") {
+                        
+                        val chestPos = Vector3f.from(
+                            pos.x.toFloat() + 0.5f,
+                            pos.y.toFloat(),
+                            pos.z.toFloat() + 0.5f
+                        )
+                        chests.add(chestPos)
                     }
-                } catch (e: Exception) {
-                    // Логируем ошибку для отладки
-                    e.printStackTrace()
                 }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
     }
@@ -57,7 +55,7 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
             val localPlayer = session.localPlayer
             val playerPos = localPlayer.vec3Position
             
-            // Очищаем сундуки, которые слишком далеко
+            // Удаляем далекие сундуки
             chests.removeIf { chest ->
                 val dx = chest.x - playerPos.x
                 val dy = chest.y - playerPos.y
@@ -67,7 +65,7 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
 
             if (chests.isEmpty()) return
 
-            // Создаем правильную view-projection матрицу
+            // Создаем view-projection матрицу
             val viewMatrix = createViewMatrix(
                 playerPos,
                 localPlayer.rotationYaw,
@@ -103,7 +101,6 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
         yaw: Float,
         pitch: Float
     ): Matrix4f {
-        // Правильная последовательность трансформаций для view матрицы
         val translation = Matrix4f.createTranslation(
             -position.x,
             -position.y,
@@ -123,7 +120,6 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
         paint: Paint,
         playerPos: Vector3f
     ) {
-        // Проверяем дистанцию
         val dx = pos.x - playerPos.x
         val dy = pos.y - playerPos.y
         val dz = pos.z - playerPos.z
@@ -131,7 +127,7 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
         
         if (distSq > maxDistance * maxDistance) return
 
-        // Вершины куба (размер блока Minecraft = 1)
+        // Вершины куба
         val vertices = arrayOf(
             Vector3f.from(pos.x - 0.5f, pos.y, pos.z - 0.5f),
             Vector3f.from(pos.x + 0.5f, pos.y, pos.z - 0.5f),
@@ -145,17 +141,17 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
 
         val screenPoints = vertices.mapNotNull { worldToScreen(it, matrix, canvas.width, canvas.height) }
         
-        if (screenPoints.size != 8) return // Не все точки видны
+        if (screenPoints.size != 8) return
 
-        // Линии куба (12 ребер)
+        // 12 ребер куба
         val edges = listOf(
-            0 to 1, 1 to 2, 2 to 3, 3 to 0, // Передняя грань
-            4 to 5, 5 to 6, 6 to 7, 7 to 4, // Задняя грань
-            0 to 4, 1 to 5, 2 to 6, 3 to 7  // Соединяющие линии
+            0 to 1, 1 to 2, 2 to 3, 3 to 0,
+            4 to 5, 5 to 6, 6 to 7, 7 to 4,
+            0 to 4, 1 to 5, 2 to 6, 3 to 7
         )
 
-        // Изменяем цвет в зависимости от расстояния
-        val distance = kotlin.math.sqrt(distSq)
+        // Меняем прозрачность по расстоянию
+        val distance = sqrt(distSq)
         val alpha = (255 * (1f - distance / maxDistance)).toInt().coerceIn(50, 255)
         paint.alpha = alpha
 
@@ -171,7 +167,6 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
     }
 
     private fun worldToScreen(pos: Vector3f, viewProj: Matrix4f, width: Int, height: Int): Vector2f? {
-        // Применяем матрицу преобразования
         val x = viewProj.get(0, 0) * pos.x + viewProj.get(0, 1) * pos.y + 
                 viewProj.get(0, 2) * pos.z + viewProj.get(0, 3)
         val y = viewProj.get(1, 0) * pos.x + viewProj.get(1, 1) * pos.y + 
@@ -179,16 +174,12 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
         val w = viewProj.get(3, 0) * pos.x + viewProj.get(3, 1) * pos.y + 
                 viewProj.get(3, 2) * pos.z + viewProj.get(3, 3)
 
-        // Проверка на то, что точка за камерой
         if (w <= 0.01f) return null
 
         val invW = 1f / w
-        
-        // NDC to screen coordinates
         val screenX = (x * invW + 1f) * 0.5f * width
         val screenY = (1f - y * invW) * 0.5f * height
 
-        // Проверка на выход за границы экрана
         if (screenX < -100 || screenX > width + 100 || 
             screenY < -100 || screenY > height + 100) {
             return null
