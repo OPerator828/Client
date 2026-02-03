@@ -27,7 +27,6 @@ class ESPModule : Module("esp", ModuleCategory.Visual) {
         }
     }
 
-
     enum class BoxMode { None, Box2D, Box3D, Corner }
     enum class TracerPosition { Bottom, Top, Center }
 
@@ -39,7 +38,8 @@ class ESPModule : Module("esp", ModuleCategory.Visual) {
     private val colorBlue by intValue("color_blue", 70, 0..255)
 
     private val showAllEntities by boolValue("show_all_entities", false)
-    private val ignoreBots by boolValue("ignore_bots", true)
+    // Изменил на false по умолчанию, чтобы видеть игроков, если PlayerList пустой
+    private val ignoreBots by boolValue("ignore_bots", false) 
     private val boxMode by enumValue("box_mode", BoxMode.Box3D, BoxMode::class.java)
 
     private val tracers by boolValue("tracers", false)
@@ -52,6 +52,9 @@ class ESPModule : Module("esp", ModuleCategory.Visual) {
 
     private fun Player.isBot(): Boolean {
         if (this is LocalPlayer) return false
+
+        // Если карта игроков пуста (сервер не отправил список), считаем всех реальными, чтобы не скрыть их
+        if (session.level.playerMap.isEmpty()) return false
 
         val playerListEntry = session.level.playerMap[this.uuid] ?: return true
 
@@ -118,17 +121,25 @@ class ESPModule : Module("esp", ModuleCategory.Visual) {
 
         if (filteredEntities.isEmpty()) return
 
+        // --- ИСПРАВЛЕНИЕ ВЫСОТЫ ГЛАЗ ---
+        // Если игрок сидит (Shift), высота глаз ниже. Обычно 1.62f, в сhifte ~1.38f
+        val eyeHeight = if (localPlayer.isSneaking) 1.38f else 1.62f
+        
+        // Позиция камеры = ноги + высота глаз
+        val cameraPos = localPlayer.vec3Position.add(0f, eyeHeight, 0f)
+
         val viewProj = Matrix4f.createPerspective(
             fov,
             canvas.width.toFloat() / canvas.height,
             0.1f,
             128f
         ).mul(
-            Matrix4f.createTranslation(localPlayer.vec3Position)
+            Matrix4f.createTranslation(cameraPos) // Используем позицию глаз, а не ног
                 .mul(rotateY(-localPlayer.rotationYaw - 180f))
                 .mul(rotateX(-localPlayer.rotationPitch))
                 .invert()
         )
+        // ---------------------------------
 
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
