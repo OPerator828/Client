@@ -135,6 +135,7 @@ object ModuleManager {
             add(TargetHudModule())
             add(FullbrightModule())
             add(ChestESPModule()) // Твоя новая функция!
+            add(XrayModule())
 
             // World
             add(FreeCameraModule())
