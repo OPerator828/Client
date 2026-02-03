@@ -7,6 +7,8 @@ import android.view.View
 import com.retrivedmods.wclient.game.ModuleManager
 import com.retrivedmods.wclient.game.module.visual.ESPModule
 import com.retrivedmods.wclient.game.module.visual.ChestESPModule
+// Если добавил Xray, раскомментируй следующую строку:
+// import com.retrivedmods.wclient.game.module.visual.XrayModule
 
 class RenderOverlayView(context: Context) : View(context) {
 
@@ -27,28 +29,37 @@ class RenderOverlayView(context: Context) : View(context) {
             var hasActiveModule = false
 
             ModuleManager.modules.forEach { module ->
+                // Проверяем, включен ли модуль и есть ли игровая сессия
                 if (module.isEnabled && module.isSessionCreated) {
-                    // Отрисовка обычного ESP
+                    
+                    // 1. Отрисовка обычного ESP (игроки)
                     if (module is ESPModule) {
                         module.render(canvas)
                         hasActiveModule = true
                     }
-                    // Отрисовка сундуков
+                    
+                    // 2. Отрисовка сундуков (ИСПРАВЛЕНО: вынес из предыдущего if)
                     if (module is ChestESPModule) {
                         module.render(canvas)
                         hasActiveModule = true
                     }
+
+                    // 3. Если захочешь Xray, добавь сюда:
+                    // if (module is XrayModule) {
+                    //    module.render(canvas)
+                    //    hasActiveModule = true
+                    // }
                 }
             }
 
-            // Заставляем экран обновляться, если включен любой ESP
+            // Если хоть один модуль что-то рисует, обновляем экран постоянно
             if (hasActiveModule) {
                 postInvalidateOnAnimation()
             }
         } catch (e: Exception) {
-            // Обработка ошибок, чтобы не крашить приложение
+            // Если произошла ошибка отрисовки, пишем в лог, но не крашим игру
             e.printStackTrace()
-            // Попробуем снова через секунду
+            // Пробуем перезапустить отрисовку через 1 секунду
             postInvalidateDelayed(1000)
         }
     }
