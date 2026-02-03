@@ -6,33 +6,48 @@ import android.graphics.Paint
 import com.retrivedmods.wclient.game.InterceptablePacket
 import com.retrivedmods.wclient.game.Module
 import com.retrivedmods.wclient.game.ModuleCategory
-import org.cloudburstmc.math.matrix.Matrix4f
 import org.cloudburstmc.math.vector.Vector2f
 import org.cloudburstmc.math.vector.Vector3f
 import org.cloudburstmc.protocol.bedrock.packet.UpdateBlockPacket
-import kotlin.math.cos
-import kotlin.math.sin
+import kotlin.math.*
 
 class XrayModule : Module("xray", ModuleCategory.Visual) {
 
     private val ores = mutableMapOf<Vector3f, Int>()
     private val fov by floatValue("fov", 90f, 40f..110f)
     private val range by floatValue("range", 30f, 10f..64f)
+    
+    // Кэш для блоков
+    private val trackedOres = setOf(
+        "diamond_ore", "ancient_debris", "gold_ore", 
+        "emerald_ore", "iron_ore", "lapis_ore", "redstone_ore"
+    )
 
     override fun beforePacketBound(interceptablePacket: InterceptablePacket) {
         val packet = interceptablePacket.packet
         if (packet is UpdateBlockPacket) {
             val blockName = packet.definition.toString().lowercase()
             val pos = packet.blockPosition
-            val vecPos = Vector3f.from(pos.x.toFloat(), pos.y.toFloat(), pos.z.toFloat())
-
-            when {
-                blockName.contains("diamond_ore") -> ores[vecPos] = Color.CYAN
-                blockName.contains("ancient_debris") -> ores[vecPos] = Color.rgb(139, 69, 19)
-                blockName.contains("gold_ore") -> ores[vecPos] = Color.YELLOW
-                blockName.contains("emerald_ore") -> ores[vecPos] = Color.GREEN
-                blockName.contains("iron_ore") -> ores[vecPos] = Color.rgb(222, 184, 135)
-                blockName.contains("air") -> ores.remove(vecPos)
+            val vecPos = Vector3f.from(pos.x, pos.y, pos.z)
+            
+            // Проверяем, является ли блок рудой
+            val isOre = trackedOres.any { blockName.contains(it) }
+            
+            if (isOre) {
+                // Назначаем цвет в зависимости от типа руды
+                ores[vecPos] = when {
+                    blockName.contains("diamond_ore") -> Color.CYAN
+                    blockName.contains("ancient_debris") -> Color.rgb(139, 69, 19) // коричневый
+                    blockName.contains("gold_ore") -> Color.YELLOW
+                    blockName.contains("emerald_ore") -> Color.GREEN
+                    blockName.contains("iron_ore") -> Color.rgb(255, 200, 150) // светло-оранжевый
+                    blockName.contains("lapis_ore") -> Color.BLUE
+                    blockName.contains("redstone_ore") -> Color.RED
+                    else -> Color.WHITE
+                }
+            } else if (blockName.contains("air")) {
+                // Удаляем блок, если он заменен воздухом
+                ores.remove(vecPos)
             }
         }
     }
@@ -43,74 +58,115 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
             val localPlayer = session.localPlayer
             val playerPos = localPlayer.vec3Position
             
+            // Очищаем дальние блоки
             ores.keys.removeIf { pos ->
                 val dx = pos.x - playerPos.x
                 val dy = pos.y - playerPos.y
                 val dz = pos.z - playerPos.z
-                (dx * dx + dy * dy + dz * dz) > range * range * 1.5
+                (dx * dx + dy * dy + dz * dz) > range * range
             }
+            
             if (ores.isEmpty()) return
 
-            val viewMatrix = createViewMatrix(playerPos, localPlayer.rotationYaw, localPlayer.rotationPitch)
-            val projMatrix = Matrix4f.createPerspective(
-                Math.toRadians(fov.toDouble()).toFloat(),
-                canvas.width.toFloat() / canvas.height.toFloat(),
-                0.05f, range * 2
-            )
-            val viewProjMatrix = projMatrix.mul(viewMatrix)
-            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 3f }
-
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { 
+                style = Paint.Style.STROKE
+                strokeWidth = 4f
+                alpha = 180
+            }
+            
+            val screenWidth = canvas.width
+            val screenHeight = canvas.height
+            
             ores.forEach { (pos, color) ->
                 paint.color = color
-                drawBlockBox(pos, viewProjMatrix, canvas, paint, playerPos)
+                // Рисуем маркер вместо 3D куба (более простой подход)
+                drawOreMarker(pos, playerPos, localPlayer.rotationYaw, 
+                    localPlayer.rotationPitch, canvas, paint, screenWidth, screenHeight)
             }
-        } catch (e: Exception) { e.printStackTrace() }
-    }
-
-    // ВОТ ЭТОЙ ФУНКЦИИ НЕ ХВАТАЛО:
-    private fun createViewMatrix(position: Vector3f, yaw: Float, pitch: Float): Matrix4f {
-        val translation = Matrix4f.createTranslation(-position.x, -position.y, -position.z)
-        val rotationPitch = rotateX(-pitch)
-        val rotationYaw = rotateY(-yaw - 180f)
-        return rotationPitch.mul(rotationYaw).mul(translation)
-    }
-
-    private fun drawBlockBox(pos: Vector3f, matrix: Matrix4f, canvas: Canvas, paint: Paint, playerPos: Vector3f) {
-        val dx = pos.x - playerPos.x; val dy = pos.y - playerPos.y; val dz = pos.z - playerPos.z
-        if ((dx * dx + dy * dy + dz * dz) > range * range) return
-        val vertices = arrayOf(
-            Vector3f.from(pos.x, pos.y, pos.z), Vector3f.from(pos.x+1, pos.y, pos.z),
-            Vector3f.from(pos.x+1, pos.y+1, pos.z), Vector3f.from(pos.x, pos.y+1, pos.z),
-            Vector3f.from(pos.x, pos.y, pos.z+1), Vector3f.from(pos.x+1, pos.y, pos.z+1),
-            Vector3f.from(pos.x+1, pos.y+1, pos.z+1), Vector3f.from(pos.x, pos.y+1, pos.z+1)
-        )
-        val screenPoints = vertices.mapNotNull { worldToScreen(it, matrix, canvas.width, canvas.height) }
-        if (screenPoints.size == 8) {
-             val edges = listOf(0 to 1, 1 to 2, 2 to 3, 3 to 0, 4 to 5, 5 to 6, 6 to 7, 7 to 4, 0 to 4, 1 to 5, 2 to 6, 3 to 7)
-             edges.forEach { (a, b) -> canvas.drawLine(screenPoints[a].x, screenPoints[a].y, screenPoints[b].x, screenPoints[b].y, paint) }
+        } catch (e: Exception) { 
+            e.printStackTrace() 
         }
     }
 
-    private fun worldToScreen(pos: Vector3f, viewProj: Matrix4f, width: Int, height: Int): Vector2f? {
-        val x = viewProj.get(0, 0) * pos.x + viewProj.get(0, 1) * pos.y + viewProj.get(0, 2) * pos.z + viewProj.get(0, 3)
-        val y = viewProj.get(1, 0) * pos.x + viewProj.get(1, 1) * pos.y + viewProj.get(1, 2) * pos.z + viewProj.get(1, 3)
-        val w = viewProj.get(3, 0) * pos.x + viewProj.get(3, 1) * pos.y + viewProj.get(3, 2) * pos.z + viewProj.get(3, 3)
-        if (w <= 0.01f) return null
-        val invW = 1f / w
-        return Vector2f.from((x * invW + 1f) * 0.5f * width, (1f - y * invW) * 0.5f * height)
-    }
-
-    private fun rotateX(angle: Float): Matrix4f {
-        val rad = Math.toRadians(angle.toDouble()).toFloat()
-        val c = cos(rad); val s = sin(rad)
-        return Matrix4f.from(1f, 0f, 0f, 0f, 0f, c, -s, 0f, 0f, s, c, 0f, 0f, 0f, 0f, 1f)
-    }
-
-    private fun rotateY(angle: Float): Matrix4f {
-        val rad = Math.toRadians(angle.toDouble()).toFloat()
-        val c = cos(rad); val s = sin(rad)
-        return Matrix4f.from(c, 0f, s, 0f, 0f, 1f, 0f, 0f, -s, 0f, c, 0f, 0f, 0f, 0f, 1f)
+    private fun drawOreMarker(
+        blockPos: Vector3f, 
+        playerPos: Vector3f,
+        yaw: Float,
+        pitch: Float,
+        canvas: Canvas,
+        paint: Paint,
+        screenWidth: Int,
+        screenHeight: Int
+    ) {
+        // Вычисляем относительную позицию блока
+        val dx = blockPos.x - playerPos.x
+        val dy = blockPos.y - playerPos.y - 1.62f // высота глаз игрока
+        val dz = blockPos.z - playerPos.z
+        
+        // Преобразуем углы в радианы
+        val yawRad = Math.toRadians(yaw.toDouble()).toFloat()
+        val pitchRad = Math.toRadians(pitch.toDouble()).toFloat()
+        
+        // Вращение по горизонтали (yaw)
+        val sinYaw = sin(yawRad)
+        val cosYaw = cos(yawRad)
+        
+        // Вращение по вертикали (pitch)
+        val sinPitch = sin(pitchRad)
+        val cosPitch = cos(pitchRad)
+        
+        // Преобразование в систему координат камеры
+        val rotatedX = cosYaw * dx - sinYaw * dz
+        val rotatedZ = sinYaw * dx + cosYaw * dz
+        
+        val rotatedY = cosPitch * dy - sinPitch * rotatedZ
+        val finalZ = sinPitch * dy + cosPitch * rotatedZ
+        
+        // Проверяем, находится ли блок перед камерой
+        if (finalZ <= 0.1f) return
+        
+        // Перспективная проекция
+        val fovRad = Math.toRadians(fov.toDouble()).toFloat()
+        val aspectRatio = screenWidth.toFloat() / screenHeight
+        val scale = (screenHeight / 2f) / tan(fovRad / 2f)
+        
+        val screenX = (rotatedX / finalZ) * scale + screenWidth / 2f
+        val screenY = (-rotatedY / finalZ) * scale + screenHeight / 2f
+        
+        // Проверяем, находится ли точка в пределах экрана
+        if (screenX in 0f..screenWidth.toFloat() && screenY in 0f..screenHeight.toFloat()) {
+            // Рисуем простой маркер (квадрат)
+            val markerSize = 15f
+            val distance = sqrt(dx*dx + dy*dy + dz*dz)
+            val alpha = (1f - distance / range).coerceIn(0.1f, 1f) * 255
+            paint.alpha = alpha.toInt()
+            
+            canvas.drawRect(
+                screenX - markerSize / 2,
+                screenY - markerSize / 2,
+                screenX + markerSize / 2,
+                screenY + markerSize / 2,
+                paint
+            )
+            
+            // Опционально: рисуем текст с расстоянием
+            if (distance < 10f) {
+                val textPaint = Paint().apply {
+                    color = Color.WHITE
+                    textSize = 20f
+                    isAntiAlias = true
+                }
+                canvas.drawText(
+                    "${distance.toInt()}m",
+                    screenX,
+                    screenY - markerSize,
+                    textPaint
+                )
+            }
+        }
     }
     
-    override fun onDisabled() { ores.clear() }
+    override fun onDisabled() { 
+        ores.clear() 
+    }
 }
