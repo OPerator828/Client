@@ -66,8 +66,8 @@ class ChestESPModule : Module("chest_esp", ModuleCategory.Visual) {
             if (DEBUG) {
                 Log.d(TAG, "Position: $pos")
                 Log.d(TAG, "Tag: $tag")
-                // ИСПРАВЛЕНО: убрали скобки ()
-                tag?.let { Log.d(TAG, "Tag keys: ${it.keySet}") }
+                // ИСПРАВЛЕНО: используем toString() вместо keySet
+                tag?.let { Log.d(TAG, "Tag content: $it") }
             }
             
             if (tag != null && pos != null) {
