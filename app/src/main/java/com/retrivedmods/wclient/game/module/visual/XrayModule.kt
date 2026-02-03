@@ -16,7 +16,6 @@ import kotlin.math.sqrt
 
 class XrayModule : Module("xray", ModuleCategory.Visual) {
 
-    // Храним найденные руды: Координаты -> Цвет
     private val ores = mutableMapOf<Vector3f, Int>()
     
     private val fov by floatValue("fov", 90f, 40f..110f)
@@ -25,19 +24,17 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
     override fun beforePacketBound(interceptablePacket: InterceptablePacket) {
         val packet = interceptablePacket.packet
 
-        // Ловим пакет обновления блока (самый легкий способ без парсинга чанков)
         if (packet is UpdateBlockPacket) {
             val blockName = packet.definition.toString().lowercase()
             val pos = packet.blockPosition
             val vecPos = Vector3f.from(pos.x.toFloat(), pos.y.toFloat(), pos.z.toFloat())
 
-            // Фильтр руд
             when {
                 blockName.contains("diamond_ore") -> ores[vecPos] = Color.CYAN
-                blockName.contains("ancient_debris") -> ores[vecPos] = Color.parseColor("#8B4513") // Коричневый
+                blockName.contains("ancient_debris") -> ores[vecPos] = Color.parseColor("#8B4513")
                 blockName.contains("gold_ore") -> ores[vecPos] = Color.YELLOW
                 blockName.contains("emerald_ore") -> ores[vecPos] = Color.GREEN
-                // Если блок стал воздухом (выкопали) - убираем из списка
+                blockName.contains("iron_ore") -> ores[vecPos] = Color.parseColor("#DEB887") // Светло-коричневый
                 blockName.contains("air") -> ores.remove(vecPos)
             }
         }
@@ -50,7 +47,7 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
             val localPlayer = session.localPlayer
             val playerPos = localPlayer.vec3Position
 
-            // Очищаем руды, которые слишком далеко (оптимизация)
+            // Оптимизация: убираем далекие блоки
             ores.keys.removeIf { pos ->
                 val dx = pos.x - playerPos.x
                 val dy = pos.y - playerPos.y
@@ -74,7 +71,6 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
                 strokeWidth = 3f
             }
 
-            // Рисуем каждую найденную руду своим цветом
             ores.forEach { (pos, color) ->
                 paint.color = color
                 drawBlockBox(pos, viewProjMatrix, canvas, paint, playerPos)
@@ -85,6 +81,14 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
         }
     }
 
+    // ВОТ ЭТУ ФУНКЦИЮ Я ЗАБЫЛ В ПРОШЛЫЙ РАЗ:
+    private fun createViewMatrix(position: Vector3f, yaw: Float, pitch: Float): Matrix4f {
+        val translation = Matrix4f.createTranslation(-position.x, -position.y, -position.z)
+        val rotationPitch = rotateX(-pitch)
+        val rotationYaw = rotateY(-yaw - 180f)
+        return rotationPitch.mul(rotationYaw).mul(translation)
+    }
+
     private fun drawBlockBox(pos: Vector3f, matrix: Matrix4f, canvas: Canvas, paint: Paint, playerPos: Vector3f) {
         val dx = pos.x - playerPos.x
         val dy = pos.y - playerPos.y
@@ -92,7 +96,6 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
         
         if ((dx * dx + dy * dy + dz * dz) > range * range) return
 
-        // Координаты блока (он занимает пространство от x до x+1)
         val vertices = arrayOf(
             Vector3f.from(pos.x, pos.y, pos.z),
             Vector3f.from(pos.x + 1f, pos.y, pos.z),
