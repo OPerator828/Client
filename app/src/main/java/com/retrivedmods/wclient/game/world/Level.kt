@@ -5,14 +5,7 @@ import com.retrivedmods.wclient.game.entity.Entity
 import com.retrivedmods.wclient.game.entity.EntityUnknown
 import com.retrivedmods.wclient.game.entity.Item
 import com.retrivedmods.wclient.game.entity.Player
-import org.cloudburstmc.protocol.bedrock.packet.AddEntityPacket
-import org.cloudburstmc.protocol.bedrock.packet.AddItemEntityPacket
-import org.cloudburstmc.protocol.bedrock.packet.AddPlayerPacket
-import org.cloudburstmc.protocol.bedrock.packet.BedrockPacket
-import org.cloudburstmc.protocol.bedrock.packet.PlayerListPacket
-import org.cloudburstmc.protocol.bedrock.packet.RemoveEntityPacket
-import org.cloudburstmc.protocol.bedrock.packet.StartGamePacket
-import org.cloudburstmc.protocol.bedrock.packet.TakeItemEntityPacket
+import org.cloudburstmc.protocol.bedrock.packet.*
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -20,12 +13,15 @@ import java.util.concurrent.ConcurrentHashMap
 class Level(val session: GameSession) {
 
     val entityMap = ConcurrentHashMap<Long, Entity>()
-
     val playerMap = ConcurrentHashMap<UUID, PlayerListPacket.Entry>()
+    
+    // Запоминаем ID локального игрока
+    var localRuntimeId: Long = 0
 
     fun onDisconnect() {
         entityMap.clear()
         playerMap.clear()
+        localRuntimeId = 0
     }
 
     fun onPacketBound(packet: BedrockPacket) {
@@ -33,6 +29,8 @@ class Level(val session: GameSession) {
             is StartGamePacket -> {
                 entityMap.clear()
                 playerMap.clear()
+                // ВАЖНО: Сохраняем свой ID при старте
+                localRuntimeId = packet.runtimeEntityId
             }
 
             is AddEntityPacket -> {
@@ -58,6 +56,11 @@ class Level(val session: GameSession) {
             }
 
             is AddPlayerPacket -> {
+                // ФИКС: Если пакет добавляет НАС ЖЕ, игнорируем его в Level.
+                // Мы уже управляем собой через LocalPlayer в GameSession.
+                // Это убирает "плавающий" бокс вокруг себя.
+                if (packet.runtimeEntityId == localRuntimeId) return
+
                 val entity = Player(
                     packet.runtimeEntityId,
                     packet.uniqueEntityId,
@@ -72,8 +75,7 @@ class Level(val session: GameSession) {
             }
 
             is RemoveEntityPacket -> {
-                val entityToRemove =
-                    entityMap.values.find { it.uniqueEntityId == packet.uniqueEntityId } ?: return
+                val entityToRemove = entityMap.values.find { it.uniqueEntityId == packet.uniqueEntityId } ?: return
                 entityMap.remove(entityToRemove.runtimeEntityId)
             }
 
@@ -92,12 +94,45 @@ class Level(val session: GameSession) {
                 }
             }
 
+            // ОПТИМИЗАЦИЯ: Прямая передача пакетов по ID.
+            // Раньше пакеты шли через "else -> forEach", что медленно и вызывало микро-фризы позиций.
+            
+            is MoveEntityAbsolutePacket -> {
+                if (packet.runtimeEntityId == localRuntimeId) return
+                entityMap[packet.runtimeEntityId]?.onPacketBound(packet)
+            }
+            
+            is MoveEntityDeltaPacket -> {
+                if (packet.runtimeEntityId == localRuntimeId) return
+                entityMap[packet.runtimeEntityId]?.onPacketBound(packet)
+            }
+            
+            is MovePlayerPacket -> {
+                if (packet.runtimeEntityId == localRuntimeId) return
+                entityMap[packet.runtimeEntityId]?.onPacketBound(packet)
+            }
+            
+            is SetEntityDataPacket -> {
+                if (packet.runtimeEntityId == localRuntimeId) return
+                entityMap[packet.runtimeEntityId]?.onPacketBound(packet)
+            }
+            
+            is MobEquipmentPacket -> {
+                 if (packet.runtimeEntityId == localRuntimeId) return
+                 entityMap[packet.runtimeEntityId]?.onPacketBound(packet)
+            }
+             
+            is MobArmorEquipmentPacket -> {
+                 if (packet.runtimeEntityId == localRuntimeId) return
+                 entityMap[packet.runtimeEntityId]?.onPacketBound(packet)
+            }
+
             else -> {
+                // Для всех остальных редких пакетов оставляем перебор
                 entityMap.values.forEach { entity ->
                     entity.onPacketBound(packet)
                 }
             }
         }
     }
-
 }
