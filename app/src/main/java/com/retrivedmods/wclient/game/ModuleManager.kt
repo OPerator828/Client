@@ -66,6 +66,7 @@ import com.retrivedmods.wclient.game.module.visual.WorldStateModule
 import com.retrivedmods.wclient.game.module.visual.ZoomModule
 import com.retrivedmods.wclient.game.module.visual.TargetHudModule
 import com.retrivedmods.wclient.game.module.visual.ChestESPModule
+import com.retrivedmods.wclient.game.module.visual.XrayModule
 import com.retrivedmods.wclient.game.module.world.FreeCameraModule
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
