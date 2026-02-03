@@ -28,7 +28,8 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
         if (packet is UpdateBlockPacket) {
             val blockName = packet.definition.toString().lowercase()
             val pos = packet.blockPosition
-            val vecPos = Vector3f.from(pos.x, pos.y, pos.z)
+            // Используем toDouble() для преобразования Int в Double
+            val vecPos = Vector3f.from(pos.x.toDouble(), pos.y.toDouble(), pos.z.toDouble())
             
             // Проверяем, является ли блок рудой
             val isOre = trackedOres.any { blockName.contains(it) }
@@ -137,7 +138,7 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
         if (screenX in 0f..screenWidth.toFloat() && screenY in 0f..screenHeight.toFloat()) {
             // Рисуем простой маркер (квадрат)
             val markerSize = 15f
-            val distance = sqrt(dx*dx + dy*dy + dz*dz)
+            val distance = sqrt(dx*dx + dy*dy + dz*dz).toFloat()
             val alpha = (1f - distance / range).coerceIn(0.1f, 1f) * 255
             paint.alpha = alpha.toInt()
             
