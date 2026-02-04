@@ -17,10 +17,10 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
 
     data class BlockPos(val x: Int, val y: Int, val z: Int) {
         fun distanceTo(otherX: Float, otherY: Float, otherZ: Float): Float {
-            val dx = x - otherX.toInt()
-            val dy = y - otherY.toInt()
-            val dz = z - otherZ.toInt()
-            return sqrt((dx * dx + dy * dy + dz * dz).toFloat())
+            val dx = x.toFloat() - otherX
+            val dy = y.toFloat() - otherY
+            val dz = z.toFloat() - otherZ
+            return sqrt(dx * dx + dy * dy + dz * dz)
         }
     }
 
@@ -28,7 +28,7 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
     private val fov by floatValue("fov", 90f, 40f..110f)
     private val range by floatValue("range", 30f, 10f..64f)
 
-    // ✅ String names для UpdateBlock (из definition.name)
+    // String names для UpdateBlock (из getIdentifier())
     private val oreTypes = mapOf(
         "diamond_ore" to Color.CYAN,
         "deepslate_diamond_ore" to Color.CYAN,
@@ -42,7 +42,9 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
         "lapis_ore" to Color.BLUE,
         "deepslate_lapis_ore" to Color.BLUE,
         "redstone_ore" to Color.RED,
+        "lit_redstone_ore" to Color.RED,
         "deepslate_redstone_ore" to Color.RED,
+        "lit_deepslate_redstone_ore" to Color.RED,
         "coal_ore" to Color.DKGRAY,
         "deepslate_coal_ore" to Color.DKGRAY,
         "copper_ore" to Color.rgb(184, 115, 51),
@@ -51,25 +53,26 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
         "nether_quartz_ore" to Color.rgb(200, 200, 200)
     )
 
-    // ✅ Runtime IDs для chunks (1.21.0-1.21.90 / 26.0 stable, из minecraft-data)
+    // Runtime IDs для chunks (1.21, из wiki + lit/quartz)
     private val oreRuntimeIds = setOf<Int>(
-        16, 17,  // coal_ore, deepslate_coal_ore
-        18, 19,  // iron_ore, deepslate_iron_ore
-        22,      // lapis_ore (deep ~23? palette var)
-        49, 50,  // gold_ore, deep
-        55, 56,  // diamond_ore, deep
-        87,      // redstone_ore (approx, palette)
-        86,      // ancient_debris
-        208,     // copper_ore (1.17+)
-        51,      // nether_gold_ore
-        52       // nether_quartz_ore
+        16, 661,  // coal_ore, deepslate_coal_ore
+        15, 656,  // iron_ore, deepslate_iron_ore
+        21, 655,  // lapis_ore, deepslate_lapis_ore
+        14, 657,  // gold_ore, deepslate_gold_ore
+        56, 660,  // diamond_ore, deepslate_diamond_ore
+        129, 662, // emerald_ore, deepslate_emerald_ore
+        73, 74, 658, 659,  // redstone_ore, lit, deep, lit_deep
+        566, 663, // copper_ore, deepslate_copper_ore
+        526,      // ancient_debris
+        543,      // nether_gold_ore
+        153       // nether_quartz_ore
     )
 
     override fun beforePacketBound(interceptablePacket: InterceptablePacket) {
         val packet = interceptablePacket.packet
         try {
             if (packet is UpdateBlockPacket) {
-                val blockName = packet.definition.name.lowercase().removePrefix("minecraft:")
+                val blockName = packet.getDefinition().getIdentifier().lowercase().removePrefix("minecraft:")
                 val pos = BlockPos(packet.blockPosition.x, packet.blockPosition.y, packet.blockPosition.z)
                 if (oreTypes.containsKey(blockName)) {
                     ores[pos] = oreTypes[blockName]!!
@@ -84,12 +87,12 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
         }
     }
 
-    // ✅ Full chunk parser v8+ (1.21/26.0)
+    // Full chunk parser v8+ (1.21)
     private fun parseLevelChunk(packet: LevelChunkPacket) {
         try {
             val chunkX = packet.chunkX * 16
             val chunkZ = packet.chunkZ * 16
-            val payloadBytes = packet.payload.array() // ByteBuf -> byte[]
+            val payloadBytes = packet.getData()  // byte[]
             val payload = decompress(payloadBytes)
             val buf = Unpooled.wrappedBuffer(payload)
 
@@ -123,11 +126,11 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
                     val bitReader = BitReader(buf)
                     for (localIdx in 0 until 4096) {
                         val idx = bitReader.readBits(bitsPerBlock)
-                        val runtimeId = if (bitsPerBlock <= 8) palette[idx] else idx
+                        val runtimeId = if (bitsPerBlock <= 8) palette.getOrNull(idx) ?: 0 else idx
                         if (runtimeId in oreRuntimeIds) {
-                            val lx = (localIdx % 16)
-                            val ly = ((localIdx / 16) % 16)
-                            val lz = ((localIdx / 256) % 16)
+                            val lx = localIdx % 16
+                            val ly = (localIdx / 16) % 16
+                            val lz = (localIdx / 256) % 16
                             val wx = chunkX + lx
                             val wy = subY + ly
                             val wz = chunkZ + lz
@@ -137,15 +140,15 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
                     }
                 }
 
-                // Skip lights (fixed size ~2-4kB per subchunk)
-                buf.skipBytes(2048 + 2048) // block light + sky light approx
+                // Skip lights (block + sky, 2048 each)
+                buf.skipBytes(2048 + 2048)
                 subY += 16
             }
             buf.release()
         } catch (e: Exception) {}
     }
 
-    // ✅ BitReader helper
+    // BitReader helper
     private class BitReader(private val buf: io.netty.buffer.ByteBuf) {
         private var bitPos = 0
         private var currentByte = 0
@@ -157,13 +160,11 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
                 if (bitPos == 0) {
                     currentByte = buf.readByte().toInt() and 0xFF
                 }
-                val bitsThis = kotlin.math.min(8 - bitPos, bitsLeft)
+                val bitsThis = min(8 - bitPos, bitsLeft)
                 val mask = (1 shl bitsThis) - 1
                 value = (value shl bitsThis) or ((currentByte shr bitPos) and mask)
                 bitPos += bitsThis
-                if (bitPos == 8) {
-                    bitPos = 0
-                }
+                if (bitPos == 8) bitPos = 0
                 bitsLeft -= bitsThis
             }
             return value
@@ -183,16 +184,17 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
     }
 
     private fun getOreColor(runtimeId: Int): Int? = when (runtimeId) {
-        16, 17 -> Color.DKGRAY      // coal
-        18, 19 -> Color.rgb(255, 200, 150)  // iron
-        49, 50 -> Color.YELLOW      // gold
-        55, 56 -> Color.CYAN        // diamond
-        22 -> Color.BLUE            // lapis approx
-        87 -> Color.RED             // redstone approx
-        86 -> Color.rgb(139, 69, 19) // ancient
-        208 -> Color.rgb(184, 115, 51) // copper
-        51 -> Color.YELLOW          // nether gold
-        52 -> Color.rgb(200, 200, 200) // quartz
+        16, 661 -> Color.DKGRAY  // coal
+        15, 656 -> Color.rgb(255, 200, 150)  // iron
+        21, 655 -> Color.BLUE  // lapis
+        14, 657 -> Color.YELLOW  // gold
+        56, 660 -> Color.CYAN  // diamond
+        129, 662 -> Color.GREEN  // emerald
+        73, 74, 658, 659 -> Color.RED  // redstone + lit
+        566, 663 -> Color.rgb(184, 115, 51)  // copper
+        526 -> Color.rgb(139, 69, 19)  // ancient
+        543 -> Color.YELLOW  // nether gold
+        153 -> Color.rgb(200, 200, 200)  // quartz
         else -> null
     }
 
@@ -205,7 +207,6 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
         return output.copyOf(len)
     }
 
-    // ✅ ТВОЙ render() как есть — топ 3D proj
     fun render(canvas: Canvas) {
         if (!isEnabled || !isSessionCreated || ores.isEmpty()) return
         
@@ -215,15 +216,12 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
             val playerY = localPlayer.vec3Position.y.toFloat()
             val playerZ = localPlayer.vec3Position.z.toFloat()
             
-            // Clean far ores
             ores.keys.removeIf { it.distanceTo(playerX, playerY, playerZ) > range }
             
             if (ores.isEmpty()) return
 
             val screenWidth = canvas.width.toFloat()
             val screenHeight = canvas.height.toFloat()
-            val centerX = screenWidth / 2f
-            val centerY = screenHeight / 2f
             
             val paint = Paint().apply {
                 style = Paint.Style.FILL_AND_STROKE
@@ -264,9 +262,9 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
         paint: Paint, outlinePaint: Paint, textPaint: Paint,
         screenWidth: Float, screenHeight: Float
     ) {
-        val dx = pos.x - playerX
-        val dy = pos.y - playerY - 1.6f
-        val dz = pos.z - playerZ
+        val dx = pos.x.toFloat() - playerX
+        val dy = pos.y.toFloat() - playerY - 1.6f
+        val dz = pos.z.toFloat() - playerZ
         
         val distance = sqrt(dx * dx + dy * dy + dz * dz)
         if (distance > range) return
