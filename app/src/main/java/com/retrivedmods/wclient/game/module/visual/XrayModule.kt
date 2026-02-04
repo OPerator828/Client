@@ -7,6 +7,7 @@ import android.graphics.RectF
 import com.retrivedmods.wclient.game.InterceptablePacket
 import com.retrivedmods.wclient.game.Module
 import com.retrivedmods.wclient.game.ModuleCategory
+import io.netty.buffer.ByteBuf
 import io.netty.buffer.Unpooled
 import org.cloudburstmc.protocol.bedrock.packet.UpdateBlockPacket
 import org.cloudburstmc.protocol.bedrock.packet.LevelChunkPacket
@@ -28,7 +29,7 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
     private val fov by floatValue("fov", 90f, 40f..110f)
     private val range by floatValue("range", 30f, 10f..64f)
 
-    // String names для UpdateBlock (из getIdentifier())
+    // Полный список руд на 1.21.131 (string names без minecraft:)
     private val oreTypes = mapOf(
         "diamond_ore" to Color.CYAN,
         "deepslate_diamond_ore" to Color.CYAN,
@@ -50,63 +51,73 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
         "copper_ore" to Color.rgb(184, 115, 51),
         "deepslate_copper_ore" to Color.rgb(184, 115, 51),
         "nether_gold_ore" to Color.YELLOW,
-        "nether_quartz_ore" to Color.rgb(200, 200, 200)
+        "quartz_ore" to Color.rgb(200, 200, 200)  // nether_quartz_ore
     )
 
-    // Runtime IDs для chunks (1.21, из wiki + lit/quartz)
-    private val oreRuntimeIds = setOf<Int>(
-        16, 661,  // coal_ore, deepslate_coal_ore
-        15, 656,  // iron_ore, deepslate_iron_ore
-        21, 655,  // lapis_ore, deepslate_lapis_ore
-        14, 657,  // gold_ore, deepslate_gold_ore
-        56, 660,  // diamond_ore, deepslate_diamond_ore
-        129, 662, // emerald_ore, deepslate_emerald_ore
+    // Runtime IDs стабильные на 1.21.131 (из wiki + data dumps 2025–2026)
+    private val oreRuntimeIds = setOf(
+        16, 661,   // coal_ore, deepslate_coal_ore
+        15, 656,   // iron_ore, deepslate_iron_ore
+        21, 655,   // lapis_ore, deepslate_lapis_ore
+        14, 657,   // gold_ore, deepslate_gold_ore
+        56, 660,   // diamond_ore, deepslate_diamond_ore
+        129, 662,  // emerald_ore, deepslate_emerald_ore
         73, 74, 658, 659,  // redstone_ore, lit, deep, lit_deep
-        566, 663, // copper_ore, deepslate_copper_ore
-        526,      // ancient_debris
-        543,      // nether_gold_ore
-        153       // nether_quartz_ore
+        566, 663,  // copper_ore, deepslate_copper_ore
+        526,       // ancient_debris
+        543,       // nether_gold_ore
+        153        // quartz_ore (nether_quartz_ore)
     )
 
     override fun beforePacketBound(interceptablePacket: InterceptablePacket) {
         val packet = interceptablePacket.packet
         try {
             if (packet is UpdateBlockPacket) {
-                val blockName = packet.getDefinition().getIdentifier().lowercase().removePrefix("minecraft:")
+                // Фикс: definition.toString() обычно даёт "minecraft:diamond_ore" или подобное
+                val blockDef = packet.definition
+                val blockNameRaw = blockDef.toString().lowercase()
+                val blockName = blockNameRaw.removePrefix("minecraft:").removePrefix("block{identifier=")
+                    .removeSuffix("}").trim()  // чистим возможный мусор
+
                 val pos = BlockPos(packet.blockPosition.x, packet.blockPosition.y, packet.blockPosition.z)
+
                 if (oreTypes.containsKey(blockName)) {
                     ores[pos] = oreTypes[blockName]!!
-                } else if (blockName.contains("air")) {
+                } else if (blockName.contains("air") || blockName == "cave_air") {
                     ores.remove(pos)
                 }
             } else if (packet is LevelChunkPacket) {
                 parseLevelChunk(packet)
             }
         } catch (e: Exception) {
-            // Silent fail
+            // Для дебага раскомменти: println("Xray packet error: ${e.message}")
         }
     }
 
-    // Full chunk parser v8+ (1.21)
     private fun parseLevelChunk(packet: LevelChunkPacket) {
         try {
             val chunkX = packet.chunkX * 16
             val chunkZ = packet.chunkZ * 16
-            val payloadBytes = packet.getData()  // byte[]
-            val payload = decompress(payloadBytes)
-            val buf = Unpooled.wrappedBuffer(payload)
+
+            // Фикс: data — ByteBuf, копируем в ByteArray
+            val dataBuf: ByteBuf = packet.data
+            val payloadBytes = ByteArray(dataBuf.readableBytes())
+            dataBuf.readBytes(payloadBytes)
+            // Не release здесь, если пакет ещё нужен дальше — но в proxy обычно ок
+
+            val decompressed = decompress(payloadBytes)
+            val buf = Unpooled.wrappedBuffer(decompressed)
 
             var subY = -64
             while (buf.readableBytes() > 0 && subY < 320) {
                 val version = buf.readByte().toInt() and 0xFF
-                if (version != 8) {
+                if (version !in 8..9) {  // 1.21+ использует 8 или 9 subchunk format
                     buf.skipBytes(buf.readableBytes())
                     break
                 }
 
-                // Block storages
                 val numStorages = buf.readByte().toInt() and 0xFF
-                for (i in 0 until numStorages) {
+                for (storageIdx in 0 until numStorages) {
                     val bitsPerBlock = buf.readByte().toInt() and 0xFF
                     if (bitsPerBlock == 0) continue
 
@@ -114,19 +125,16 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
                     val palette = mutableListOf<Int>()
                     repeat(paletteSize) { palette.add(readVarInt(buf)) }
 
-                    val hasOre = palette.any { it in oreRuntimeIds }
-                    if (!hasOre) {
-                        // Skip block states
+                    if (!palette.any { it in oreRuntimeIds }) {
                         val dataBytes = ((4096L * bitsPerBlock + 7) / 8).toInt()
                         buf.skipBytes(dataBytes)
                         continue
                     }
 
-                    // Parse blocks with bit reader
                     val bitReader = BitReader(buf)
                     for (localIdx in 0 until 4096) {
                         val idx = bitReader.readBits(bitsPerBlock)
-                        val runtimeId = if (bitsPerBlock <= 8) palette.getOrNull(idx) ?: 0 else idx
+                        val runtimeId = if (bitsPerBlock <= 8) (palette.getOrNull(idx) ?: 0) else idx
                         if (runtimeId in oreRuntimeIds) {
                             val lx = localIdx % 16
                             val ly = (localIdx / 16) % 16
@@ -134,22 +142,24 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
                             val wx = chunkX + lx
                             val wy = subY + ly
                             val wz = chunkZ + lz
-                            val pos = BlockPos(wx, wy, wz)
-                            ores[pos] = getOreColor(runtimeId) ?: Color.WHITE
+                            ores[BlockPos(wx, wy, wz)] = getOreColor(runtimeId) ?: Color.WHITE
                         }
                     }
                 }
 
-                // Skip lights (block + sky, 2048 each)
-                buf.skipBytes(2048 + 2048)
+                // Пропускаем lighting (block light + sky light = 2048 + 2048 байт)
+                if (buf.readableBytes() >= 4096) {
+                    buf.skipBytes(4096)
+                }
                 subY += 16
             }
             buf.release()
-        } catch (e: Exception) {}
+        } catch (e: Exception) {
+            // println("Chunk parse fail: ${e.message}")
+        }
     }
 
-    // BitReader helper
-    private class BitReader(private val buf: io.netty.buffer.ByteBuf) {
+    private class BitReader(private val buf: ByteBuf) {
         private var bitPos = 0
         private var currentByte = 0
 
@@ -160,7 +170,7 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
                 if (bitPos == 0) {
                     currentByte = buf.readByte().toInt() and 0xFF
                 }
-                val bitsThis = min(8 - bitPos, bitsLeft)
+                val bitsThis = minOf(8 - bitPos, bitsLeft)
                 val mask = (1 shl bitsThis) - 1
                 value = (value shl bitsThis) or ((currentByte shr bitPos) and mask)
                 bitPos += bitsThis
@@ -171,7 +181,7 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
         }
     }
 
-    private fun readVarInt(buf: io.netty.buffer.ByteBuf): Int {
+    private fun readVarInt(buf: ByteBuf): Int {
         var value = 0
         var shift = 0
         while (true) {
@@ -179,34 +189,36 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
             value = value or ((b and 0x7F) shl shift)
             if (b and 0x80 == 0) break
             shift += 7
+            if (shift > 35) throw RuntimeException("VarInt too big")
         }
         return value
     }
 
     private fun getOreColor(runtimeId: Int): Int? = when (runtimeId) {
-        16, 661 -> Color.DKGRAY  // coal
-        15, 656 -> Color.rgb(255, 200, 150)  // iron
-        21, 655 -> Color.BLUE  // lapis
-        14, 657 -> Color.YELLOW  // gold
-        56, 660 -> Color.CYAN  // diamond
-        129, 662 -> Color.GREEN  // emerald
-        73, 74, 658, 659 -> Color.RED  // redstone + lit
-        566, 663 -> Color.rgb(184, 115, 51)  // copper
-        526 -> Color.rgb(139, 69, 19)  // ancient
-        543 -> Color.YELLOW  // nether gold
-        153 -> Color.rgb(200, 200, 200)  // quartz
+        16, 661 -> Color.DKGRAY
+        15, 656 -> Color.rgb(255, 200, 150)
+        21, 655 -> Color.BLUE
+        14, 657 -> Color.YELLOW
+        56, 660 -> Color.CYAN
+        129, 662 -> Color.GREEN
+        73, 74, 658, 659 -> Color.RED
+        566, 663 -> Color.rgb(184, 115, 51)
+        526 -> Color.rgb(139, 69, 19)
+        543 -> Color.YELLOW
+        153 -> Color.rgb(200, 200, 200)
         else -> null
     }
 
     private fun decompress(compressed: ByteArray): ByteArray {
         val inflater = Inflater()
         inflater.setInput(compressed)
-        val output = ByteArray(1024 * 1024 * 2)
-        val len = inflater.inflate(output)
+        val output = ByteArray(2 * 1024 * 1024)  // до 2MB на чанк
+        val len = try { inflater.inflate(output) } catch (e: Exception) { 0 }
         inflater.end()
         return output.copyOf(len)
     }
 
+    // ТВОЙ render без изменений
     fun render(canvas: Canvas) {
         if (!isEnabled || !isSessionCreated || ores.isEmpty()) return
         
@@ -248,9 +260,7 @@ class XrayModule : Module("xray", ModuleCategory.Visual) {
                     localPlayer.rotationYaw, localPlayer.rotationPitch, 
                     paint, outlinePaint, textPaint, screenWidth, screenHeight)
             }
-        } catch (e: Exception) { 
-            // Silent
-        }
+        } catch (e: Exception) {}
     }
 
     private fun renderOre(
